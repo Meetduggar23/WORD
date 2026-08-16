@@ -5,6 +5,7 @@
 <p align="center">
   A modern, browser-based word processor with a rich editing experience.
 </p>
+
 ## Features
 
 - **Rich Text Editing** – Formatting, fonts, colors, highlights, hyperlinks, and more
