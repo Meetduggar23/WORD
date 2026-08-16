@@ -2,16 +2,9 @@
   <img src="public/logo.png" alt="Word Doc Logo" width="180" />
 </p>
 
-<h1 align="center">Word Doc</h1>
-
 <p align="center">
   A modern, browser-based word processor with a rich editing experience.
 </p>
-
-<p align="center">
-  <strong>LM Technologies</strong>
-</p>
-
 ---
 
 ## Features
@@ -64,5 +57,5 @@ npm run preview
 ---
 
 <p align="center">
-  <strong>Word Doc</strong> · Built with ❤ by <strong>LM Technologies</strong>
+  <strong>Word Doc</strong> · Made by <strong>Meet Duggar </strong>
 </p>
