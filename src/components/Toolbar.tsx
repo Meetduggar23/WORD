@@ -92,6 +92,7 @@ interface ToolbarProps {
   onAlign?: (dir: 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom') => void;
   onDistribute?: () => void;
   onParagraphSpacing?: (before: number, after: number) => void;
+  onIndentMargin?: (side: 'left' | 'right', value: number) => void;
   layoutPreset: string;
   marginPreset: string;
   customSize: { w: number; h: number };
@@ -176,7 +177,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
   onOpenCustomMarginsDialog, onOpenCustomSizeDialog, onSetPageLayoutUnit,
   onSetLineNumbers, onSetHyphenation, onInsertBreak,
   onToggleSelectionPane, onBringForward, onSendBackward, onBringToFront, onSendToBack,
-  onGroup, onUngroup, onRotate, onAlignToPage, onAlign, onDistribute, onParagraphSpacing,
+  onGroup, onUngroup, onRotate, onAlignToPage, onAlign, onDistribute, onParagraphSpacing, onIndentMargin,
   layoutPreset, marginPreset, customSize,
   currentTextColor, onTextColorChange,
   isBold, onBold, isItalic, onItalic, isUnderline, onUnderline,
@@ -230,6 +231,10 @@ const Toolbar: React.FC<ToolbarProps> = ({
   const [showFontSize, setShowFontSize] = useState(false);
   const [listType, setListType] = useState<'none' | 'bullet' | 'number' | 'multi-level'>('none');
   const [lineSpacing, setLineSpacing] = useState(1.15);
+  const [indentLeft, setIndentLeft] = useState(0);
+  const [indentRight, setIndentRight] = useState(0);
+  const [spacingBefore, setSpacingBefore] = useState(0);
+  const [spacingAfter, setSpacingAfter] = useState(0);
   const shapeRef = useRef<HTMLDivElement>(null);
   const aspectRatioRef = useRef<HTMLDivElement>(null);
   const imageDropdownRef = useRef<HTMLDivElement>(null);
@@ -446,6 +451,20 @@ const Toolbar: React.FC<ToolbarProps> = ({
   };
 
   const handleBorders = () => exec('insertHorizontalRule');
+
+  const applyIndent = (side: 'left' | 'right', value: number) => {
+    const v = Math.max(0, Math.min(100, Math.round(value * 10) / 10));
+    if (side === 'left') setIndentLeft(v); else setIndentRight(v);
+    onIndentMargin?.(side, v);
+  };
+
+  const applySpacing = (before: number, after: number) => {
+    const b = Math.max(0, Math.min(100, Math.round(before)));
+    const a = Math.max(0, Math.min(100, Math.round(after)));
+    setSpacingBefore(b);
+    setSpacingAfter(a);
+    onParagraphSpacing?.(b, a);
+  };
 
   return (
     <div className="ribbon-toolbar">
@@ -1070,15 +1089,21 @@ const Toolbar: React.FC<ToolbarProps> = ({
                     <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
                       <span style={{ fontSize: 11, color: 'var(--text-secondary)', minWidth: 26 }}>Left:</span>
                       <div style={{ position: 'relative' }}>
-                        <input type="number" className="indent-spacing-input" defaultValue={0} min={0} max={100} step={0.1} />
-                        <div className="spinner-arrows"><button tabIndex={-1}>▲</button><button tabIndex={-1}>▼</button></div>
+                        <input type="number" className="indent-spacing-input" value={indentLeft} min={0} max={100} step={0.1} onChange={e => applyIndent('left', parseFloat(e.target.value) || 0)} />
+                        <div className="spinner-arrows">
+                          <button tabIndex={-1} onClick={() => applyIndent('left', indentLeft + 0.1)}>▲</button>
+                          <button tabIndex={-1} onClick={() => applyIndent('left', indentLeft - 0.1)}>▼</button>
+                        </div>
                       </div>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
                       <span style={{ fontSize: 11, color: 'var(--text-secondary)', minWidth: 26 }}>Right:</span>
                       <div style={{ position: 'relative' }}>
-                        <input type="number" className="indent-spacing-input" defaultValue={0} min={0} max={100} step={0.1} />
-                        <div className="spinner-arrows"><button tabIndex={-1}>▲</button><button tabIndex={-1}>▼</button></div>
+                        <input type="number" className="indent-spacing-input" value={indentRight} min={0} max={100} step={0.1} onChange={e => applyIndent('right', parseFloat(e.target.value) || 0)} />
+                        <div className="spinner-arrows">
+                          <button tabIndex={-1} onClick={() => applyIndent('right', indentRight + 0.1)}>▲</button>
+                          <button tabIndex={-1} onClick={() => applyIndent('right', indentRight - 0.1)}>▼</button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1086,15 +1111,21 @@ const Toolbar: React.FC<ToolbarProps> = ({
                     <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
                       <span style={{ fontSize: 11, color: 'var(--text-secondary)', minWidth: 36 }}>Before:</span>
                       <div style={{ position: 'relative' }}>
-                        <input type="number" className="indent-spacing-input" defaultValue={0} min={0} max={100} step={6} />
-                        <div className="spinner-arrows"><button tabIndex={-1}>▲</button><button tabIndex={-1}>▼</button></div>
+                        <input type="number" className="indent-spacing-input" value={spacingBefore} min={0} max={100} step={6} onChange={e => applySpacing(parseFloat(e.target.value) || 0, spacingAfter)} />
+                        <div className="spinner-arrows">
+                          <button tabIndex={-1} onClick={() => applySpacing(spacingBefore + 6, spacingAfter)}>▲</button>
+                          <button tabIndex={-1} onClick={() => applySpacing(spacingBefore - 6, spacingAfter)}>▼</button>
+                        </div>
                       </div>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
                       <span style={{ fontSize: 11, color: 'var(--text-secondary)', minWidth: 32 }}>After:</span>
                       <div style={{ position: 'relative' }}>
-                        <input type="number" className="indent-spacing-input" defaultValue={0} min={0} max={100} step={6} />
-                        <div className="spinner-arrows"><button tabIndex={-1}>▲</button><button tabIndex={-1}>▼</button></div>
+                        <input type="number" className="indent-spacing-input" value={spacingAfter} min={0} max={100} step={6} onChange={e => applySpacing(spacingBefore, parseFloat(e.target.value) || 0)} />
+                        <div className="spinner-arrows">
+                          <button tabIndex={-1} onClick={() => applySpacing(spacingBefore, spacingAfter + 6)}>▲</button>
+                          <button tabIndex={-1} onClick={() => applySpacing(spacingBefore, spacingAfter - 6)}>▼</button>
+                        </div>
                       </div>
                     </div>
                   </div>

@@ -4304,3 +4304,19 @@ body {
 }
 
 /* ===== Quick Access Toolbar (inline, already defined above) ===== */
+
+/* ===== Show Formatting Marks (paragraph marks) ===== */
+.show-formatting-marks [data-page-editor="true"] p::after {
+  content: '¶';
+  color: #cbd5e1;
+  font-size: 0.9em;
+  margin-left: 2px;
+}
+.show-formatting-marks [data-page-editor="true"] br {
+  display: inline;
+}
+.show-formatting-marks [data-page-editor="true"] br::after {
+  content: '⏎';
+  color: #cbd5e1;
+  font-size: 0.9em;
+}

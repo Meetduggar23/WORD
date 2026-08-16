@@ -379,9 +379,18 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
     const stored = safeGetStorageItem('worddoc-autosave', '');
     return stored !== 'false';
   });
-  const [recentDocuments] = useState<string[]>(() => {
+  const [recentDocuments, setRecentDocuments] = useState<string[]>(() => {
     return safeGetStorageJson<string[]>('worddoc-recent', []);
   });
+  const recordRecentDocument = useCallback((name: string) => {
+    if (!name) return;
+    try {
+      const recent = safeGetStorageJson<string[]>('worddoc-recent', []);
+      const next = [name, ...recent.filter(r => r !== name)].slice(0, 10);
+      localStorage.setItem('worddoc-recent', JSON.stringify(next));
+      setRecentDocuments(next);
+    } catch {}
+  }, []);
   const autoSaveTimerRef = useRef<number | null>(null);
 
   const [isImageSelected, setIsImageSelected] = useState(false);
@@ -1888,6 +1897,21 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
     }
   }, [saveState]);
 
+  const handleIndentMargin = useCallback((side: 'left' | 'right', value: number) => {
+    const editor = document.querySelector('[data-page-editor="true"]') as HTMLElement | null;
+    if (!editor || document.activeElement !== editor) return;
+    const selection = window.getSelection();
+    const block = selection?.anchorNode ? (selection.anchorNode.nodeType === Node.ELEMENT_NODE
+      ? selection.anchorNode as HTMLElement
+      : selection.anchorNode.parentElement) : null;
+    const target = block?.closest('p,div,li,blockquote,h1,h2,h3,h4,h5,h6') as HTMLElement | null;
+    if (!target) return;
+    if (side === 'left') target.style.marginLeft = `${Math.max(0, value)}px`;
+    else target.style.marginRight = `${Math.max(0, value)}px`;
+    editor.dispatchEvent(new Event('input', { bubbles: true }));
+    hasUnsavedChangesRef.current = true;
+  }, []);
+
   const handleApplyListType = useCallback((type: 'none' | 'bullet' | 'number' | 'multi-level') => {
     if (type === 'bullet') execInEditor('insertUnorderedList');
     else if (type === 'number' || type === 'multi-level') execInEditor('insertOrderedList');
@@ -1969,7 +1993,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
     saveState();
   }, [saveState]);
 
-  const handleDistribute = useCallback(() => {
+  const handleDistribute = useCallback((dir: 'h' | 'v' = 'h') => {
     const c = canvasInstance.current;
     if (!c) return;
     const active = c.getActiveObject();
@@ -1977,16 +2001,20 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
     const sel = active as any;
     const objs = sel._objects || [];
     if (objs.length < 2) return;
-    const sorted = [...objs].sort((a: any, b: any) => a.left - b.left);
-    const totalWidth = sorted.reduce((sum: number, o: any) => sum + o.getBoundingRect().width, 0);
-    const firstLeft = sorted[0].left;
-    const lastRight = sorted[sorted.length - 1].left + sorted[sorted.length - 1].getBoundingRect().width;
-    const gap = (lastRight - firstLeft - totalWidth) / (objs.length - 1);
-    let currentLeft = firstLeft;
+    const isHorizontal = dir !== 'v';
+    const sorted = [...objs].sort((a: any, b: any) => (isHorizontal ? a.left - b.left : a.top - b.top));
+    const span = (o: any) => (isHorizontal ? o.getBoundingRect().width : o.getBoundingRect().height);
+    const pos = (o: any) => (isHorizontal ? o.left : o.top);
+    const totalSpan = sorted.reduce((sum: number, o: any) => sum + span(o), 0);
+    const firstPos = pos(sorted[0]);
+    const lastEnd = pos(sorted[sorted.length - 1]) + span(sorted[sorted.length - 1]);
+    const gap = (lastEnd - firstPos - totalSpan) / (objs.length - 1);
+    let currentPos = firstPos;
     for (const obj of sorted) {
-      obj.set('left', currentLeft);
+      if (isHorizontal) obj.set('left', currentPos);
+      else obj.set('top', currentPos);
       obj.setCoords();
-      currentLeft += obj.getBoundingRect().width + gap;
+      currentPos += span(obj) + gap;
     }
     c.renderAll();
     saveState();
@@ -2455,8 +2483,8 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
         fullDocumentHtmlRef.current = '';
         pageTextSegmentsRef.current = [''];
       setPageTextSegments(['']);
-      setDocName('Document1');
-      safeSetStorageItem('worddoc-docname', 'Document1');
+      setDocName('Doc1');
+      safeSetStorageItem('worddoc-docname', 'Doc1');
         historyRef.current = [];
         historyIdxRef.current = -1;
         hasUnsavedChangesRef.current = false;
@@ -2478,8 +2506,8 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
     fullDocumentHtmlRef.current = '';
     pageTextSegmentsRef.current = [''];
     setPageTextSegments(['']);
-    setDocName('Document1');
-    safeSetStorageItem('worddoc-docname', 'Document1');
+    setDocName('Doc1');
+    safeSetStorageItem('worddoc-docname', 'Doc1');
     historyRef.current = [];
     historyIdxRef.current = -1;
     hasUnsavedChangesRef.current = false;
@@ -2504,7 +2532,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
             const c = canvasInstance.current;
             const loadedName = typeof data.title === 'string' && data.title.trim()
               ? data.title.trim()
-              : file.name.replace(/\.json$/i, '') || 'Document1';
+              : file.name.replace(/\.json$/i, '') || 'Doc1';
             const sourcePages = data.pages as PageData[];
             const fullHtml = typeof data.documentHtml === 'string'
               ? data.documentHtml
@@ -2608,9 +2636,10 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
     link.click();
     URL.revokeObjectURL(url);
     hasUnsavedChangesRef.current = false;
+    recordRecentDocument(docName);
     setShowSuccess(true);
     setTimeout(() => setShowSuccess(false), 2000);
-  }, [activePageIndex, docName, headerContent, footerContent, headerEnabled, footerEnabled, differentFirstPage, comments, columns, orientation, pageBackgroundColor, layoutPreset, marginPreset, customSize, pageMargins, pageLayoutUnit, lineNumbersMode, hyphenationMode]);
+  }, [activePageIndex, docName, headerContent, footerContent, headerEnabled, footerEnabled, differentFirstPage, comments, columns, orientation, pageBackgroundColor, layoutPreset, marginPreset, customSize, pageMargins, pageLayoutUnit, lineNumbersMode, hyphenationMode, recordRecentDocument]);
 
   const handlePrint = useCallback(async () => {
     const c = canvasInstance.current;
@@ -2819,7 +2848,11 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
   }, []);
 
   const handleToggleShowFormatting = useCallback(() => {
-    setShowFormatting(prev => !prev);
+    setShowFormatting(prev => {
+      const next = !prev;
+      document.body.classList.toggle('show-formatting-marks', next);
+      return next;
+    });
   }, []);
 
   const handleTogglePageBorder = useCallback(() => {
@@ -3160,7 +3193,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
       if (!canvasInstance.current || !pagesRef.current.length) {
         throw new Error('No document content to export.');
       }
-      const name = saveDialogName.trim() || 'Document1';
+      const name = saveDialogName.trim() || 'Doc1';
       const ext = saveDialogFormat === 'pdf' ? 'pdf' : saveDialogFormat === 'docx' ? 'docx' : saveDialogFormat === 'svg' ? 'svg' : saveDialogFormat === 'json' ? 'json' : saveDialogFormat === 'jpg' ? 'jpg' : 'png';
       const fullName = `${name}.${ext}`;
       setDocName(name);
@@ -3301,6 +3334,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
       }
 
       hasUnsavedChangesRef.current = false;
+      recordRecentDocument(name);
       setExportLoading(false);
       setExportSuccessFile(fullName);
       setTimeout(() => { setShowSaveDialog(false); setExportSuccessFile(''); }, 1600);
@@ -3315,7 +3349,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
       setShowError(true);
       setTimeout(() => setShowError(false), 4000);
     }
-  }, [saveDialogName, saveDialogFormat, docName, activePageIndex, generateThumbnail, runPagination, getAllPageData, headerContent, footerContent, headerEnabled, footerEnabled, differentFirstPage, comments, columns, orientation, pageBackgroundColor, layoutPreset, marginPreset, customSize, pageMargins, pageLayoutUnit, lineNumbersMode, hyphenationMode, exportJsonPretty, exportLoading, exportScale, exportTransparentBg, exportJpegQuality]);
+  }, [saveDialogName, saveDialogFormat, docName, activePageIndex, generateThumbnail, runPagination, getAllPageData, headerContent, footerContent, headerEnabled, footerEnabled, differentFirstPage, comments, columns, orientation, pageBackgroundColor, layoutPreset, marginPreset, customSize, pageMargins, pageLayoutUnit, lineNumbersMode, hyphenationMode, exportJsonPretty, exportLoading, exportScale, exportTransparentBg, exportJpegQuality, recordRecentDocument]);
 
   const handleFeedback = useCallback(() => {
     setShowFeedbackDialog(true);
@@ -3379,7 +3413,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'S' || e.key === 's')) {
       if (isInput) return;
       e.preventDefault();
-      setSaveDialogName(docName || 'Document1');
+      setSaveDialogName(docName || 'Doc1');
       setSaveDialogFormat('pdf');
       setShowSaveDialog(true);
       return;
@@ -3532,7 +3566,55 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
       e.preventDefault();
       handleDuplicate();
     }
-  }, [handleDelete, handleCopy, handleCut, handlePaste, undo, redo, handleDuplicate, isCropMode, handleCropCancel, handleNewDocument, handleOpenDocument, handleSaveDocument, handleFindReplace, handleExport, handleToggleRibbon, switchToPage, activePageIndex, pages.length, showGoToPage, handleZoom, handleZoomTo, focusMode]);
+    if (e.altKey && e.key === 'ArrowLeft') {
+      if (isInput) return;
+      e.preventDefault();
+      const active = canvasInstance.current?.getActiveObject();
+      if (active) {
+        active.set('angle', ((active.angle || 0) - 90) % 360);
+        active.setCoords();
+        canvasInstance.current?.renderAll();
+        saveState();
+      }
+      return;
+    }
+    if (e.altKey && e.key === 'ArrowRight') {
+      if (isInput) return;
+      e.preventDefault();
+      const active = canvasInstance.current?.getActiveObject();
+      if (active) {
+        active.set('angle', ((active.angle || 0) + 90) % 360);
+        active.setCoords();
+        canvasInstance.current?.renderAll();
+        saveState();
+      }
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === '[') {
+      if (isInput) return;
+      e.preventDefault();
+      const c = canvasInstance.current;
+      const active = c?.getActiveObject();
+      if (c && active) {
+        c.bringForward(active);
+        c.renderAll();
+        saveState();
+      }
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === ']') {
+      if (isInput) return;
+      e.preventDefault();
+      const c = canvasInstance.current;
+      const active = c?.getActiveObject();
+      if (c && active) {
+        c.sendBackwards(active);
+        c.renderAll();
+        saveState();
+      }
+      return;
+    }
+  }, [handleDelete, handleCopy, handleCut, handlePaste, undo, redo, handleDuplicate, isCropMode, handleCropCancel, handleNewDocument, handleOpenDocument, handleSaveDocument, handleFindReplace, handleExport, handleToggleRibbon, switchToPage, activePageIndex, pages.length, showGoToPage, handleZoom, handleZoomTo, focusMode, saveState]);
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
@@ -3910,6 +3992,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
       { id: 'highlight', label: 'Highlight', icon: I.highlight, onClick: promptHighlight },
       { id: 'hyperlink', label: 'Hyperlink', icon: I.hyperlink, onClick: handleOpenLink },
       { id: 'editHyperlink', label: 'Edit Hyperlink', icon: I.hyperlink, disabled: !hasLink, onClick: handleOpenLink },
+      { id: 'openHyperlink', label: 'Open Hyperlink', icon: I.hyperlink, disabled: !hasLink, onClick: handleOpenLinkedUrl },
       { id: 'removeHyperlink', label: 'Remove Hyperlink', icon: I.hyperlink, disabled: !hasLink, onClick: handleRemoveLink },
       { id: 'comment', label: 'Comment', icon: I.comment, onClick: handleAddComment },
       { id: 'delete', label: 'Delete', icon: I.delete, danger: true, onClick: () => { if (isTextMode) execInEditor('delete'); else handleDelete(); } },
@@ -3944,7 +4027,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
       { id: 'flipH', label: 'Flip Horizontal', icon: I.flipH, onClick: handleFlipH },
       { id: 'flipV', label: 'Flip Vertical', icon: I.flipV, onClick: handleFlipV },
       { id: 'lockAspect', label: 'Lock Aspect Ratio', icon: isLocked ? I.lock : I.lockOpen, checked: !!isLocked, onClick: () => { const obj = c?.getActiveObject() as any; if (!obj) return; obj.lockUniScaling = !obj.lockUniScaling; c?.renderAll(); saveState(); } },
-      { id: 'compress', label: 'Compress Image', icon: I.compress, onClick: () => { /* compress placeholder - maintains compatibility */ } },
+      { id: 'compress', label: 'Compress Image', icon: I.compress, onClick: () => { const obj = c?.getActiveObject() as any; if (!obj || obj.type !== 'image') return; const el = obj.getElement && obj.getElement(); if (!el || !el.naturalWidth) return; const w = Math.max(1, Math.round(el.naturalWidth / 2)); const h = Math.max(1, Math.round(el.naturalHeight / 2)); const tmp = document.createElement('canvas'); tmp.width = w; tmp.height = h; const ctx = tmp.getContext('2d'); if (!ctx) return; ctx.drawImage(el, 0, 0, w, h); fabric.Image.fromURL(tmp.toDataURL('image/jpeg', 0.8), (img: any) => { if (!img || !c) return; img.set({ left: obj.left, top: obj.top, scaleX: obj.scaleX, scaleY: obj.scaleY, angle: obj.angle, clipPath: obj.clipPath || null }); c.remove(obj); c.add(img); c.setActiveObject(img); c.renderAll(); saveState(); }); } },
       { id: 'resetPicture', label: 'Reset Picture', icon: I.resetImage, onClick: () => { const obj = c?.getActiveObject() as any; if (!obj || obj.type !== 'image') return; obj.set({ flipX: false, flipY: false, angle: 0, opacity: 1, clipPath: null, filters: [] }); obj.applyFilters(); c?.renderAll(); saveState(); } },
       { id: 'imageProps', label: 'Image Properties', icon: I.imageProperties, onClick: () => { setShowPreferences(true); } },
       { id: 'arrange', label: 'Arrange', icon: I.arrange, children: arrangeChildren },
@@ -3973,8 +4056,8 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
       { id: 'alignLeft', label: 'Align Left', icon: I.alignLeft, onClick: () => handleAlign('left') },
       { id: 'alignCenter', label: 'Align Center', icon: I.alignCenter, onClick: () => handleAlign('center') },
       { id: 'alignRight', label: 'Align Right', icon: I.alignRight, onClick: () => handleAlign('right') },
-      { id: 'distH', label: 'Distribute Horizontally', icon: I.distH, onClick: handleDistribute },
-      { id: 'distV', label: 'Distribute Vertically', icon: I.distV, onClick: handleDistribute },
+      { id: 'distH', label: 'Distribute Horizontally', icon: I.distH, onClick: () => handleDistribute('h') },
+      { id: 'distV', label: 'Distribute Vertically', icon: I.distV, onClick: () => handleDistribute('v') },
       { id: 'arrange', label: 'Arrange', icon: I.arrange, children: arrangeChildren },
       { id: 'duplicate', label: 'Duplicate', icon: I.duplicate, onClick: handleDuplicate },
       { id: 'delete', label: 'Delete', icon: I.delete, danger: true, onClick: handleDelete },
@@ -4180,6 +4263,16 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
           onSetHyphenation={handleSetHyphenation}
           onToggleSelectionPane={handleToggleSelectionPane}
           onParagraphSpacing={handleParagraphSpacing}
+          onIndentMargin={handleIndentMargin}
+          onInsertBreak={handleInsertBreak}
+          onRotate={handleRotate90}
+          onGroup={handleGroup}
+          onUngroup={handleUngroup}
+          onAlign={handleAlign}
+          onBringForward={handleBringForward}
+          onSendBackward={handleSendBackward}
+          onBringToFront={handleBringToFront}
+          onSendToBack={handleSendToBack}
           layoutPreset={layoutPreset}
           marginPreset={marginPreset}
           customSize={customSize}
@@ -4277,7 +4370,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           </button>
           <div className="qat-separator" />
-          <button className="ribbon-btn primary" onClick={() => { setSaveDialogName(docName || 'Document1'); setSaveDialogFormat('pdf'); setShowSaveDialog(true); }} title="Export" style={{ flexDirection: 'row', gap: 6, minHeight: 32, fontSize: 13, padding: '4px 14px' }}>
+          <button className="ribbon-btn primary" onClick={() => { setSaveDialogName(docName || 'Doc1'); setSaveDialogFormat('pdf'); setShowSaveDialog(true); }} title="Export" style={{ flexDirection: 'row', gap: 6, minHeight: 32, fontSize: 13, padding: '4px 14px' }}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
             Export
           </button>
@@ -5162,7 +5255,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
             <div className="save-dialog-footer">
               <div className="save-dialog-footer-left">
                 <span className="save-dialog-filename-preview">{
-                  (saveDialogName.trim() || 'Document1') + '.' + (saveDialogFormat === 'pdf' ? 'pdf' : saveDialogFormat === 'docx' ? 'docx' : saveDialogFormat === 'svg' ? 'svg' : saveDialogFormat === 'json' ? 'json' : saveDialogFormat === 'jpg' ? 'jpg' : 'png')
+                  (saveDialogName.trim() || 'Doc1') + '.' + (saveDialogFormat === 'pdf' ? 'pdf' : saveDialogFormat === 'docx' ? 'docx' : saveDialogFormat === 'svg' ? 'svg' : saveDialogFormat === 'json' ? 'json' : saveDialogFormat === 'jpg' ? 'jpg' : 'png')
                 }</span>
               </div>
               <div className="save-dialog-footer-right">

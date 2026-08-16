@@ -18,7 +18,7 @@ const App: React.FC = () => {
   }, []);
 
   const [docName, setDocName] = useState(() => {
-    return safeGetStorageItem('worddoc-docname', 'Document1') || 'Document1';
+    return safeGetStorageItem('worddoc-docname', 'Doc1') || 'Doc1';
   });
 
   const handleDocNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -30,8 +30,8 @@ const App: React.FC = () => {
   const handleDocNameBlur = (e: React.FocusEvent<HTMLInputElement>) => {
     const val = e.target.value.trim();
     if (!val) {
-      setDocName('Document1');
-      safeSetStorageItem('worddoc-docname', 'Document1');
+      setDocName('Doc1');
+      safeSetStorageItem('worddoc-docname', 'Doc1');
     }
   };
 
@@ -55,8 +55,7 @@ const App: React.FC = () => {
           <div className="app-header-left">
             <div className="app-logo" onClick={handleLogoClick} title="New Document">
               <img className="app-logo-img" src="/logo.png" alt="Word Doc logo" />
-              <span>Word Doc</span>
-              <span className="app-version"><span style={{ color: 'var(--text-muted)' }}>LM </span><span className="app-version-italian">Technologies</span></span>
+              <span>Word</span>
             </div>
             <div className="header-title-separator" />
             <input
