@@ -180,7 +180,7 @@ function measureHtml(surface: HTMLDivElement, html: string): number {
 }
 
 function isManualPageBreakNode(node: Node): boolean {
-  return node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).getAttribute(MANUAL_PAGE_BREAK_ATTR) === 'true';
+  return node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).hasAttribute(MANUAL_PAGE_BREAK_ATTR);
 }
 
 function splitNodeToFit(
@@ -1049,11 +1049,23 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
   const deletePage = useCallback((index: number) => {
     const currentPages = pagesRef.current;
     if (currentPages.length <= 1) return;
-    const newPages = currentPages.filter((_, i) => i !== index);
+    const c = canvasInstance.current;
+    const snapshotted = c
+      ? currentPages.map((p, i) =>
+          i === activePageIndex
+            ? {
+                ...p,
+                objects: JSON.stringify(c.toJSON(['name', 'link', 'cornerRadius'])),
+                thumbnail: generateThumbnail(),
+                content: pageTextSegmentsRef.current[i] || '',
+              }
+            : p
+        )
+      : currentPages;
+    const newPages = snapshotted.filter((_, i) => i !== index);
     setPages(newPages);
     pagesRef.current = newPages;
     const newIdx = Math.min(index, newPages.length - 1);
-    const c = canvasInstance.current;
     if (c) {
       c.loadFromJSON(JSON.parse(newPages[newIdx].objects), () => {
         c.renderAll();
@@ -1064,7 +1076,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
       });
     }
     setActivePageIndex(newIdx);
-  }, [checkCanvasEmpty, updateSelection, saveState]);
+  }, [checkCanvasEmpty, updateSelection, saveState, activePageIndex, generateThumbnail]);
 
   const [editingPageIndex, setEditingPageIndex] = useState<number | null>(null);
   const [editingPageName, setEditingPageName] = useState('');
@@ -1107,6 +1119,21 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
     pagesRef.current = newPages;
     switchToPage(index + 1);
   }, [switchToPage]);
+
+  const handleReorderPage = useCallback((fromIndex: number, toIndex: number) => {
+    const currentPages = pagesRef.current;
+    if (fromIndex === toIndex || fromIndex < 0 || fromIndex >= currentPages.length || toIndex < 0 || toIndex >= currentPages.length) return;
+    const newPages = [...currentPages];
+    const [moved] = newPages.splice(fromIndex, 1);
+    newPages.splice(toIndex, 0, moved);
+    pagesRef.current = newPages;
+    setPages(newPages);
+    let newActive = activePageIndex;
+    if (fromIndex === activePageIndex) newActive = toIndex;
+    else if (fromIndex < activePageIndex && toIndex >= activePageIndex) newActive = activePageIndex - 1;
+    else if (fromIndex > activePageIndex && toIndex <= activePageIndex) newActive = activePageIndex + 1;
+    setActivePageIndex(newActive);
+  }, [activePageIndex]);
 
   const handleInsertBreak = useCallback((kind: PageBreakKind = 'page') => {
     if (execInEditor('insertHTML', createBreakMarker(kind))) {
@@ -1385,7 +1412,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
     };
     autoSaveTimerRef.current = window.setInterval(save, 30000);
     return () => { if (autoSaveTimerRef.current) clearInterval(autoSaveTimerRef.current); };
-  }, [autoSaveEnabled, activePageIndex]);
+  }, [autoSaveEnabled, activePageIndex, headerContent, footerContent, headerEnabled, footerEnabled, differentFirstPage, comments, columns, orientation, pageBackgroundColor, layoutPreset, marginPreset, customSize, pageMargins, pageLayoutUnit, lineNumbersMode, hyphenationMode]);
 
   useEffect(() => {
     const handler = () => closeContextMenu();
@@ -1491,6 +1518,8 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
         newZoom = Math.min(containerW / c.width, containerH / c.height);
         newZoom = Math.max(0.1, Math.min(5, newZoom));
       }
+    } else if (dir === 'actual') {
+      newZoom = 1;
     }
     c.setZoom(newZoom);
     const vpt = c.viewportTransform;
@@ -1599,6 +1628,18 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
       }
       case 'heart':
         shape = new fabric.Path('M 60 100 C 20 60, 0 30, 30 10 C 45 -5, 60 10, 60 30 C 60 10, 75 -5, 90 10 C 120 30, 100 60, 60 100 Z', { ...opts, stroke: currentShapeColor, strokeWidth: 1 }); break;
+      case 'arrow':
+        shape = new fabric.Path('M5 12h14m-6-6l6 6-6 6', { ...opts, left: 150, top: 150, scaleX: 5, scaleY: 5, stroke: currentShapeColor, strokeWidth: 3, fill: 'transparent' }); break;
+      case 'speech-bubble':
+        shape = new fabric.Path('M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2z', { ...opts, left: 150, top: 150, scaleX: 5, scaleY: 5 }); break;
+      case 'cloud':
+        shape = new fabric.Path('M4 14.5a4.5 4.5 0 1 1 3.5-7.97A6 6 0 0 1 18 11.5a4 4 0 0 1-1 7.5H8a5 5 0 0 1-4-4.5z', { ...opts, left: 150, top: 150, scaleX: 5, scaleY: 5 }); break;
+      case 'cross':
+        shape = new fabric.Path('M10 4h4v6h6v4h-6v6h-4v-6H4v-4h6z', { ...opts, left: 150, top: 150, scaleX: 5, scaleY: 5 }); break;
+      case 'pentagram-star':
+        shape = new fabric.Path('M12 2l1.5 4.6h4.9l-4 2.9 1.5 4.6L12 11.2l-4 2.9 1.5-4.6-4-2.9h4.9z', { ...opts, left: 150, top: 150, scaleX: 5, scaleY: 5 }); break;
+      case 'octagon':
+        shape = new fabric.Path('M7.5 3h9L21 7.5v9L16.5 21h-9L3 16.5v-9z', { ...opts, left: 150, top: 150, scaleX: 5, scaleY: 5 }); break;
       default:
         shape = new fabric.Rect({ ...opts, width: 120, height: 80 });
     }
@@ -1849,9 +1890,12 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
 
   const handleApplyListType = useCallback((type: 'none' | 'bullet' | 'number' | 'multi-level') => {
     if (type === 'bullet') execInEditor('insertUnorderedList');
-    else if (type === 'number') execInEditor('insertOrderedList');
+    else if (type === 'number' || type === 'multi-level') execInEditor('insertOrderedList');
     else if (type === 'none') {
-      execInEditor('insertUnorderedList');
+      const editor = document.querySelector('[data-page-editor="true"]') as HTMLElement | null;
+      if (editor) editor.focus();
+      if (document.queryCommandState('insertUnorderedList')) execInEditor('insertUnorderedList');
+      else if (document.queryCommandState('insertOrderedList')) execInEditor('insertOrderedList');
     }
   }, []);
 
@@ -2127,9 +2171,8 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
           left: cropRect.left, top: cropRect.top,
           scaleX: scaleX, scaleY: scaleY,
         });
-        if (img.filters) {
-          img.set('clipPath', new fabric.Rect({ width: cropW, height: cropH, originX: 'left', originY: 'top' }));
-        }
+        img.set('clipPath', new fabric.Rect({ width: Math.max(1, cropW), height: Math.max(1, cropH), originX: 'left', originY: 'top' }));
+        img.setCoords();
       }
     }
     if (cropRect) c.remove(cropRect);
@@ -2306,8 +2349,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
 
     try {
       if (format === 'docx') {
-        const content = ExportManager.generateDocxContent(updatedPages, docName);
-        const blob = new Blob([content], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+        const blob = await ExportManager.generateDocxBlob(updatedPages, docName);
         ExportManager.downloadBlob(blob, `${docName}.docx`, () => { setShowSuccess(true); setTimeout(() => setShowSuccess(false), 2000); });
         return;
       }
@@ -2570,20 +2612,32 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
     setTimeout(() => setShowSuccess(false), 2000);
   }, [activePageIndex, docName, headerContent, footerContent, headerEnabled, footerEnabled, differentFirstPage, comments, columns, orientation, pageBackgroundColor, layoutPreset, marginPreset, customSize, pageMargins, pageLayoutUnit, lineNumbersMode, hyphenationMode]);
 
-  const handlePrint = useCallback(() => {
+  const handlePrint = useCallback(async () => {
     const c = canvasInstance.current;
     if (!c) return;
-    const dataUrl = c.toDataURL({ multiplier: 2 });
+    runPagination();
+    const currentPages = pagesRef.current;
+    if (!currentPages.length) return;
+    const currentIdx = activePageIndex;
+    const currentJson = JSON.stringify(c.toJSON(['name', 'link', 'cornerRadius']));
+    const updatedPages = currentPages.map((p, i) =>
+      i === currentIdx ? { ...p, objects: currentJson, content: pageTextSegmentsRef.current[i] || '' } : p
+    );
+    const snapshots = await getAllPageData(updatedPages);
     const win = window.open('', '_blank');
     if (win) {
       win.document.write('<html><head><title>Print</title></head><body style="text-align:center;margin:0;padding:20px">');
-      win.document.write('<img src="' + dataUrl + '" style="max-width:100%;height:auto"/>');
+      snapshots.forEach((s, i) => {
+        if (s.dataUrl) {
+          win.document.write(`<img src="${s.dataUrl}" style="max-width:100%;height:auto;${i < snapshots.length - 1 ? 'page-break-after:always;' : ''}"/>`);
+        }
+      });
       win.document.write('</body></html>');
       win.document.close();
       win.focus();
       setTimeout(() => win.print(), 500);
     }
-  }, []);
+  }, [activePageIndex, getAllPageData, runPagination]);
 
   const handleFindReplace = useCallback(() => {
     setShowFindReplace(prev => !prev);
@@ -2995,7 +3049,9 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
         c.setWidth(Math.round(newW));
         c.setHeight(Math.round(newH));
         c.renderAll();
-        setPages(prev => prev.map(p => ({ ...p, width: Math.round(newW), height: Math.round(newH) })));
+        const nextPages = pagesRef.current.map(p => ({ ...p, width: Math.round(newW), height: Math.round(newH) }));
+        pagesRef.current = nextPages;
+        setPages(nextPages);
         saveState();
       }
     }
@@ -3096,10 +3152,14 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
   }, []);
 
   const handleSaveDialogSave = useCallback(async () => {
+    if (exportLoading) return;
     setExportLoading(true);
     setExportSuccessFile('');
     localStorage.setItem('worddoc-last-export-format', saveDialogFormat);
     try {
+      if (!canvasInstance.current || !pagesRef.current.length) {
+        throw new Error('No document content to export.');
+      }
       const name = saveDialogName.trim() || 'Document1';
       const ext = saveDialogFormat === 'pdf' ? 'pdf' : saveDialogFormat === 'docx' ? 'docx' : saveDialogFormat === 'svg' ? 'svg' : saveDialogFormat === 'json' ? 'json' : saveDialogFormat === 'jpg' ? 'jpg' : 'png';
       const fullName = `${name}.${ext}`;
@@ -3111,7 +3171,6 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
       runPagination();
 
       if (saveDialogFormat === 'json') {
-        if (!canvasInstance.current || !pagesRef.current.length) return;
         const c = canvasInstance.current;
         const currentIdx = activePageIndex;
         const currentJson = JSON.stringify(c.toJSON(['name', 'link', 'cornerRadius']));
@@ -3155,7 +3214,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
           });
           const compositePages = await Promise.all(rasterPromises);
           const blob = ExportManager.generatePdfBlob(compositePages);
-          if ('showDirectoryPicker' in window) {
+          if ('showSaveFilePicker' in window) {
             try {
               const handle = await (window as any).showSaveFilePicker({ suggestedName: fullName, types: [{ description: 'PDF', accept: { 'application/pdf': ['.pdf'] } }] });
               const writable = await (handle as any).createWritable();
@@ -3167,9 +3226,8 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
       } else if (saveDialogFormat === 'docx') {
         const pages = pagesRef.current;
         if (pages.length) {
-          const content = ExportManager.generateDocxContent(pages, name);
-          const blob = new Blob([content], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
-          if ('showDirectoryPicker' in window) {
+          const blob = await ExportManager.generateDocxBlob(pages, name);
+          if ('showSaveFilePicker' in window) {
             try {
               const handle = await (window as any).showSaveFilePicker({ suggestedName: fullName, types: [{ description: 'Word Document', accept: { 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'] } }] });
               const writable = await (handle as any).createWritable();
@@ -3193,7 +3251,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
           const compositeSvg = ExportManager.buildCompositePageSvg(currentPage, currentSnapshot?.dataUrl);
           ExportManager.validateSvg(compositeSvg);
           const blob = new Blob([compositeSvg], { type: 'image/svg+xml' });
-          if ('showDirectoryPicker' in window) {
+          if ('showSaveFilePicker' in window) {
             try {
               const handle = await (window as any).showSaveFilePicker({ suggestedName: fullName, types: [{ description: 'SVG Image', accept: { 'image/svg+xml': ['.svg'] } }] });
               const writable = await (handle as any).createWritable();
@@ -3216,10 +3274,13 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
           const pageSnapshots = await getAllPageData(updatedPages);
           const currentPage = updatedPages[currentIdx];
           const currentSnapshot = pageSnapshots[currentIdx];
-          const compositeSvg = ExportManager.buildCompositePageSvg(currentPage, currentSnapshot?.dataUrl);
+          const transparentBg = saveDialogFormat === 'png' && exportTransparentBg;
+          const compositeSvg = ExportManager.buildCompositePageSvg(currentPage, currentSnapshot?.dataUrl, transparentBg);
           const canvasFallback = canvasInstance.current;
-          const dataUrl = await ExportManager.rasterizeSvgWithFallback(compositeSvg, mimeType, () => canvasFallback);
-          if ('showDirectoryPicker' in window) {
+          const scale = Math.max(0.1, parseFloat(exportScale) || 1);
+          const quality = saveDialogFormat === 'jpg' ? Math.min(1, Math.max(0, (parseInt(exportJpegQuality, 10) || 100) / 100)) : undefined;
+          const dataUrl = await ExportManager.rasterizeSvgWithFallback(compositeSvg, mimeType, () => canvasFallback, { scale, quality });
+          if ('showSaveFilePicker' in window) {
             const response = await fetch(dataUrl);
             const blob = await response.blob();
             try {
@@ -3254,7 +3315,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
       setShowError(true);
       setTimeout(() => setShowError(false), 4000);
     }
-  }, [saveDialogName, saveDialogFormat, docName, activePageIndex, generateThumbnail, runPagination, getAllPageData, headerContent, footerContent, headerEnabled, footerEnabled, differentFirstPage, comments, columns, orientation, pageBackgroundColor, layoutPreset, marginPreset, customSize, pageMargins, pageLayoutUnit, lineNumbersMode, hyphenationMode, exportJsonPretty]);
+  }, [saveDialogName, saveDialogFormat, docName, activePageIndex, generateThumbnail, runPagination, getAllPageData, headerContent, footerContent, headerEnabled, footerEnabled, differentFirstPage, comments, columns, orientation, pageBackgroundColor, layoutPreset, marginPreset, customSize, pageMargins, pageLayoutUnit, lineNumbersMode, hyphenationMode, exportJsonPretty, exportLoading, exportScale, exportTransparentBg, exportJpegQuality]);
 
   const handleFeedback = useCallback(() => {
     setShowFeedbackDialog(true);
@@ -3313,6 +3374,14 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
       if (isInput) return;
       e.preventDefault();
       handleOpenDocument();
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'S' || e.key === 's')) {
+      if (isInput) return;
+      e.preventDefault();
+      setSaveDialogName(docName || 'Document1');
+      setSaveDialogFormat('pdf');
+      setShowSaveDialog(true);
       return;
     }
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
@@ -4258,7 +4327,7 @@ const Editor = forwardRef<EditorHandle, EditorProps>(({ docName, setDocName }, r
             onAddPage={addPage}
             onDeletePage={deletePage}
             onDuplicatePage={duplicatePage}
-            onReorderPage={() => {}}
+            onReorderPage={handleReorderPage}
           />
         )}
       <div className="editor-main-area">
