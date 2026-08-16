@@ -5,8 +5,6 @@
 <p align="center">
   A modern, browser-based word processor with a rich editing experience.
 </p>
----
-
 ## Features
 
 - **Rich Text Editing** – Formatting, fonts, colors, highlights, hyperlinks, and more
@@ -39,23 +37,6 @@ npm run build
 # Preview the production build
 npm run preview
 ```
-
-## Project Structure
-
-```
-├── public/        # Static assets (logo, favicons)
-├── scripts/       # Utility scripts (icon generation)
-├── src/
-│   ├── components/  # UI components (Editor, Toolbar, LoadingScreen, ...)
-│   ├── utils/       # Helpers (storage, export)
-│   ├── App.tsx      # Root app component
-│   ├── main.tsx     # Entry point
-│   └── styles.css   # Global styles
-└── index.html
-```
-
----
-
 <p align="center">
   <strong>Word Doc</strong> · Made by <strong>Meet Duggar </strong>
 </p>
