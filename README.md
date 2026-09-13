@@ -5,26 +5,76 @@
 <h1 align="center">WORD</h1>
 
 <p align="center">
-  <strong>An AI-native word processor built for the way people actually write.</strong>
+  <strong>A modern word processor built for the way people actually write.</strong>
 </p>
 
 <p align="center">
+  <a href="#what-is-word">What is WORD</a> &nbsp;&middot;&nbsp;
+  <a href="#how-it-works">How it Works</a> &nbsp;&middot;&nbsp;
   <a href="#features">Features</a> &nbsp;&middot;&nbsp;
-  <a href="#ai--intelligence">Intelligence</a> &nbsp;&middot;&nbsp;
-  <a href="#architecture">Architecture</a> &nbsp;&middot;&nbsp;
-  <a href="#getting-started">Get Started</a> &nbsp;&middot;&nbsp;
+  <a href="#get-started">Get Started</a> &nbsp;&middot;&nbsp;
   <a href="#roadmap">Roadmap</a>
 </p>
 
 ---
 
-WORD is a modern document editor that pairs a premium Microsoft Word-inspired interface with deep AI integration. It ships with 20 intelligent features, a command palette, voice control, and a full privacy model that lets you run AI entirely on your own machine.
+## What is WORD
+
+WORD is a full-featured word processor designed for everyday writing — from letters and essays to reports and documentation. It gives you everything you'd expect from a professional document editor: rich text formatting, page-based layout, tables, headers and footers, and a familiar ribbon-based interface.
+
+What sets WORD apart is its built-in AI intelligence. It doesn't just store your words — it understands them. WORD can proofread your writing, suggest improvements, analyze document structure, answer questions about your content, and even respond to voice commands. It works offline with on-device AI or connects to cloud services like OpenAI for more powerful capabilities.
+
+Whether you're a student writing an essay, a professional drafting a report, or a developer documenting a project, WORD adapts to your workflow.
+
+---
+
+## How it Works
+
+### Writing and Editing
+
+WORD uses a page-based canvas that renders your document exactly as it will appear when printed. You write in a clean, distraction-free editor with a floating toolbar for quick formatting. The ribbon at the top provides access to all tools organized into tabs — File, Home, Insert, Draw, Design, Layout, References, Mailings, Developer, and View.
+
+Everything you type is processed through a document engine that maintains your content's structure. This means WORD understands the difference between a heading, a paragraph, a list item, and a table — not just the raw text.
+
+### AI Intelligence
+
+WORD's AI runs in multiple modes:
+
+- **On-device (offline):** A rule-based engine that works without an internet connection. It handles proofreading, formatting analysis, text simplification, and document health checks using local heuristics.
+- **Cloud-powered:** Connect to OpenAI, Ollama, or any compatible API for advanced rewriting, translation, tone adjustment, and natural language commands.
+- **Privacy-first:** A status indicator shows whether AI is running locally or in the cloud. You control which mode is active.
+
+When you select text and choose an AI action — like "make this more formal" or "fix grammar" — WORD sends your text to the active AI provider and presents the suggestion as a card. You can replace the original, insert below, copy, or dismiss. Nothing changes without your approval.
+
+### Command Palette
+
+Press `Ctrl+K` to open the command palette. It fuzzy-searches through 50+ commands — bold, insert table, find and replace, export PDF, and more. You can also type a natural language request like "make this paragraph shorter" and WORD will route it to the appropriate AI action.
+
+### Voice Control
+
+WORD listens for voice commands through your browser's speech recognition. Say things like "insert a table with four columns," "go to the introduction heading," or "bold the selected text" to control the editor hands-free.
+
+### Document Analysis
+
+WORD continuously evaluates your document's health across six dimensions: structure, style, clarity, consistency, formatting, and length. It gives you a score from 0 to 100 and suggests one-click fixes. There's also a cleanup planner that previews structural changes before applying them, and a design inspector that checks typography consistency.
+
+### Smart Features
+
+- **Smart Paste** detects when you paste content from the web, a PDF, or a spreadsheet and suggests the best format.
+- **Table Intelligence** analyzes tables for patterns, anomalies, and data insights.
+- **Smart References** auto-renumber figures and tables and update in-text citations.
+- **Document Test** runs an automated check for common writing problems.
+- **Time Machine** saves snapshots of your document so you can restore previous versions and see exactly what changed.
+
+### Privacy and Control
+
+You decide where your data goes. WORD shows a Lock or Cloud badge in the status bar indicating the current AI mode. You can toggle any AI feature on or off per device, use a local Ollama server, or bring your own API key. No data leaves your machine unless you explicitly choose a cloud provider.
 
 ---
 
 ## Features
 
-### Editing & Formatting
+### Editing and Formatting
 
 - Rich text editing with page-based layout
 - Character and paragraph formatting
@@ -34,117 +84,45 @@ WORD is a modern document editor that pairs a premium Microsoft Word-inspired in
 - Headers, footers, and page numbers
 - Style system with heading hierarchy
 
-### AI & Intelligence
+### AI-Powered Writing
 
-| Feature | What it does |
-|---|---|
-| **Command Palette** | `Ctrl+K` — fuzzy-search 50+ commands, or type a natural language request and route it to AI |
-| **AI Inline Actions** | Rewrite, shorten, formalize, proofread, translate, simplify, expand, or change tone of selected text |
-| **Suggestion Cards** | AI suggestions appear as cards with **Replace / Insert Below / Copy / Dismiss** — never auto-replaces your work |
-| **Ask Document** | Retrieval-augmented Q&A over your document with clickable source citations |
-| **Semantic Search** | TF-IDF indexed document brain with exact and semantic search modes |
-| **Document Health** | 0–100 score across structure, style, clarity, consistency, formatting, and length with one-click fixes |
-| **Cleanup Planner** | Preview and apply structural cleanup as a single undoable action |
-| **Design Inspector** | Inspect typography and formatting consistency of any selection |
-| **Smart Paste** | Detects web, PDF, TSV, and key-value content and suggests the best paste mode |
-| **Table Intelligence** | Analyze tables for anomalies and patterns, generate charts |
-| **Smart References** | Auto-renumber Figure and Table captions with in-text reference updates |
-| **Document Test** | CI-style test suite that checks your document for common problems |
-| **Voice Commands** | "Insert a table with four columns", "Go to heading", "Bold the selection" |
+- **AI Inline Actions** — Rewrite, shorten, formalize, proofread, translate, simplify, expand, or change tone
+- **Suggestion Cards** — Review AI suggestions before applying them
+- **Ask Document** — Ask questions about your document with source citations
+- **Semantic Search** — Search your document by meaning, not just keywords
+- **Document Health** — Score and improve your writing across six quality metrics
+- **Voice Commands** — Control the editor with your voice
 
 ### Developer Tools
 
-- **Code Block Dialog** — insert syntax-highlighted code in 16 languages with line numbers
-- **JSON Tools** — validate, fix, format, minify, and tree-view JSON content
-- **Markdown Import/Export** — round-trip between Markdown and the editor's document model
-- **Word-Level Diff** — visual diff between any two text states, showing exactly what changed
+- **Code Block Dialog** — Insert syntax-highlighted code in 16 languages
+- **JSON Tools** — Validate, format, minify, and inspect JSON
+- **Markdown Import/Export** — Convert between Markdown and WORD format
+- **Word-Level Diff** — Visual comparison between any two versions of your text
 
-### History & Focus
+### History and Focus
 
-- **Time Machine** — snapshot history with restore and visual diff between versions
-- **Focus Mode** — distraction-free writing with session timer, words-per-session, and daily writing goals
-- **Analytics** — reading time, word count, paragraph count, and document structure overview
-
-### Privacy
-
-- **Lock / Cloud badge** in the status bar shows whether AI runs locally or in the cloud
-- **On-device tools** — local provider uses rule-based heuristics, never fakes AI
-- **Ollama / local servers** — connect to any OpenAI-compatible endpoint on your machine
-- **Custom provider** — bring your own API key and endpoint
-- **Feature flags** — toggle every AI feature on or off per device
+- **Time Machine** — Snapshot history with visual diff
+- **Focus Mode** — Distraction-free writing with session timer and daily goals
+- **Analytics** — Reading time, word count, paragraph count, and document structure
 
 ---
 
-## Architecture
-
-```
-WORD/
-├── src/
-│   ├── engine/          Core document model (3700+ lines)
-│   ├── features/
-│   │   ├── ai/          Provider abstraction + local/openai/custom
-│   │   ├── brain/       TF-IDF document indexer + React provider
-│   │   ├── commands/    50+ commands + NL intent routing
-│   │   ├── history/     Snapshots + writing goals
-│   │   ├── intel/       Health, cleanup, doc test, design inspector, refs, table intel
-│   │   ├── speech/      Web Speech API + command grammar
-│   │   └── text/        Diff, markdown, JSON tools, code tokenizer, smart paste
-│   ├── components/
-│   │   ├── ai/          AIPanel, inline actions, suggestion cards
-│   │   ├── command/     Command palette
-│   │   ├── dialogs/     12 feature dialogs
-│   │   ├── editor/      Document canvas, floating toolbar, focus HUD
-│   │   ├── panels/      Health panel, design inspector, nav rail, voice control
-│   │   └── toolbar/     Ribbon with 10 tabs
-│   ├── store/           UI state (zustand-style)
-│   ├── hooks/           Document engine context
-│   └── styles/          CSS variables + global design system
-├── test/                52 tests (brain, features, intelligence, app)
-└── public/              Static assets
-```
-
-### Design System
-
-- **Fluent-inspired surfaces** — layered elevation, soft shadows, acrylic overlays
-- **Word blue `#103f91`** — title bar and accent across the entire UI
-- **10 ribbon tabs** — File, Home, Insert, Draw, Design, Layout, References, Mailings, Developer, View
-- **Left navigation rail** — 7-icon rail for quick access to document sections
-- **Spring-eased transitions** — with `prefers-reduced-motion` support
-- **Zero emojis in code** — all icons from `lucide-react`
-
-### Tech Stack
-
-| Layer | Technology |
-|---|---|
-| UI | React 18 + TypeScript |
-| Bundler | Vite 5 |
-| Icons | lucide-react |
-| AI (local) | Rule-based heuristics — honest, no fake AI |
-| AI (cloud) | OpenAI-compatible API (Ollama, OpenAI, custom) |
-| Testing | Vitest + Testing Library |
-| Linting | ESLint with strict zero-warning config |
-| Speech | Web Speech API |
-
----
-
-## Getting Started
+## Get Started
 
 ### Prerequisites
 
 - **Node.js 18+** and npm
 - A modern browser (Chrome, Edge, Firefox)
 
-### Install & Run
+### Install and Run
 
 ```bash
-# Clone
-git clone https://github.com/Meetduggar23/M-WORD.git
-cd M-WORD/frontend/react
+git clone https://github.com/Meetduggar23/WORD.git
+cd WORD/frontend/react
 
-# Install
 npm install
 
-# Start dev server
 npm run dev
 ```
 
@@ -153,27 +131,11 @@ The app opens at `http://localhost:5173`.
 ### Commands
 
 ```bash
-npm run dev          # Start Vite dev server
-npm run build        # TypeScript compile + Vite build
-npm run lint         # ESLint (zero warnings)
-npm run test         # Vitest in watch mode
-npm run test -- --run # Single test run
+npm run dev          # Start dev server
+npm run build        # Build for production
+npm run lint         # Run linter
+npm run test         # Run tests
 ```
-
----
-
-## Testing
-
-52 tests across 4 suites:
-
-| Suite | Tests | Coverage |
-|---|---|---|
-| `brain.test.ts` | TF-IDF indexing, semantic search | Feature logic |
-| `features.test.ts` | Diff, JSON, Markdown, paste, voice, readability | Text & speech |
-| `intelligence.test.ts` | Health, cleanup, doc test, refs, table intel, inspector | All intel modules |
-| `App.test.tsx` | Core render, formatting, page-aware layout | Engine |
-
-All pass. Build is clean. Lint has zero warnings.
 
 ---
 
@@ -191,16 +153,8 @@ All pass. Build is clean. Lint has zero warnings.
 
 ## Contributing
 
-Contributions are welcome. Run `npm run lint` and `npm run test -- --run` before pushing. The codebase enforces zero lint warnings.
+Contributions are welcome. Run `npm run lint` and `npm run test -- --run` before pushing.
 
 ---
 
-## License
-
-MIT
-
----
-
-<p align="center">
-  <sub>Built with React, TypeScript, and a lot of Lucide icons.</sub>
-</p>
+## Made By Meet Duggar 
