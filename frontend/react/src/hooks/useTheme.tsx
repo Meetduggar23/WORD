@@ -53,6 +53,9 @@ export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     const root = document.documentElement;
     root.setAttribute('data-theme', resolvedTheme);
     root.style.colorScheme = resolvedTheme;
+    // Keep the browser UI (title bar / address bar) tinted to match the theme
+    const meta = document.querySelector('meta[name="theme-color"]');
+    meta?.setAttribute('content', resolvedTheme === 'dark' ? '#122a4f' : '#103f91');
   }, [resolvedTheme]);
 
   const setTheme = useCallback((next: Theme) => {

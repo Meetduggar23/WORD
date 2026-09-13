@@ -59,8 +59,15 @@ export const FileMenu: React.FC<FileMenuProps> = ({ onClose, onOpenSettings, onO
     { format: 'JSON', icon: <Braces size={18} strokeWidth={1.8} />, description: 'WORD native format', extension: '.json' },
   ];
 
-  const handleNewBlank = () => { engine.newDocument(); onClose(); };
-  const handleNewTemplate = (templateName: string) => { engine.newDocument(); engine.setDocumentTitle(templateName); onClose(); };
+  // New documents must go through the app shell so the current document is
+  // stashed into its tab first (engine.newDocument() here wiped the live
+  // document while the tab still pointed at the old snapshot).
+  const requestNewDocument = (templateName?: string) => {
+    window.dispatchEvent(new CustomEvent('word:new-document', { detail: { templateName } }));
+    onClose();
+  };
+  const handleNewBlank = () => requestNewDocument();
+  const handleNewTemplate = (templateName: string) => requestNewDocument(templateName);
   const handleSave = () => { engine.saveDocument(); onClose(); };
   const handleSaveAsJSON = () => {
     const json = engine.exportJSON();

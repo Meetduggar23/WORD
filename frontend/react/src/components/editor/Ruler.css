@@ -1,6 +1,6 @@
 .ruler-container {
   height: 24px;
-  background: linear-gradient(180deg, #f6f6f6 0%, #ededed 100%);
+  background: linear-gradient(180deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
   border-bottom: 1px solid var(--border-subtle);
   user-select: none;
   overflow: hidden;
@@ -13,18 +13,18 @@
 }
 
 .ruler-margin {
-  background: rgba(0, 0, 0, 0.04);
+  background: var(--hover-color);
   cursor: col-resize;
   position: relative;
   transition: background-color var(--transition-fast);
 }
 
 .ruler-margin:hover {
-  background: rgba(27, 106, 201, 0.1);
+  background: var(--accent-softer);
 }
 
 .ruler-margin.dragging {
-  background: rgba(27, 106, 201, 0.18);
+  background: var(--accent-soft);
 }
 
 .ruler-margin-left {

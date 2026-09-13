@@ -657,7 +657,7 @@ export interface TrackChangesState {
 // ─── Page Setup ──────────────────────────────────────────────────────────────
 
 export type PageSize = 'letter' | 'legal' | 'tabloid' | 'A3' | 'A4' | 'A5' | 'B4' |
-  'B5' | ' executive' | 'statement' | 'envelope' | '8x10' | '10x14' | 'custom';
+  'B5' | 'executive' | 'statement' | 'envelope' | '8x10' | '10x14' | 'custom';
 
 export interface SectionProperties {
   pageSize: PageSize;
@@ -1718,21 +1718,44 @@ export class DocumentEngine {
     let insertText = text;
     const para = this.findParagraph(this.cursor.blockId);
     if (para && text === ' ') {
-      const fullText = para.textRuns.map(r => r.text).join('');
+      const textBeforeCursor = this.getAllText().substring(0, this.getAbsoluteOffset(this.cursor));
       for (const entry of this.document.autoCorrectEntries) {
-        const textBefore = fullText.substring(0, this.getAbsoluteOffset(this.cursor));
-        if (textBefore.toLowerCase().endsWith(entry.trigger.toLowerCase())) {
-          const triggerStart = this.cursor.offset - entry.trigger.length;
-          if (triggerStart >= 0) {
-            const run = para.textRuns[this.cursor.runIndex];
-            if (run) {
-              const before = run.text.substring(0, triggerStart);
-              run.text = before + entry.replacement + run.text.substring(this.cursor.offset);
-              this.cursor.offset = before.length + entry.replacement.length;
-              insertText = ' ';
-              break;
-            }
+        const trigger = entry.trigger;
+        const triggerNoSpace = trigger.replace(/\s+$/, '');
+        // Only fire when the trigger word is complete at the caret (avoid
+        // rewriting mid-word like "the" inside "theory") and the full trigger
+        // (which may span runs) matches the text just before the cursor.
+        if (!triggerNoSpace) continue;
+        const endsWithWord = new RegExp(`(^|\\s)${triggerNoSpace.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+        if (!endsWithWord.test(textBeforeCursor)) continue;
+        if (!textBeforeCursor.toLowerCase().endsWith(trigger.toLowerCase())) continue;
+
+        // Replace across runs: walk back trigger.length chars from the caret.
+        let remaining = trigger.length;
+        let ri = this.cursor.runIndex;
+        let ro = this.cursor.offset;
+        let replacedTail = '';
+        let ok = true;
+        while (remaining > 0 && ri >= 0) {
+          const r = para.textRuns[ri];
+          if (!r) { ok = false; break; }
+          const take = Math.min(remaining, ro);
+          const piece = r.text.substring(ro - take, ro);
+          if (piece.toLowerCase() !== trigger.substring(trigger.length - remaining, trigger.length).toLowerCase()) { ok = false; break; }
+          replacedTail = piece + replacedTail;
+          r.text = r.text.substring(0, ro - take);
+          remaining -= take;
+          if (remaining > 0) { ri--; ro = r.text.length; }
+        }
+        if (ok && remaining === 0) {
+          const targetRun = para.textRuns[ri] ?? para.textRuns[ri + 1];
+          if (targetRun) {
+            targetRun.text = targetRun.text + entry.replacement;
+            this.cursor.runIndex = para.textRuns.indexOf(targetRun) < 0 ? this.cursor.runIndex : para.textRuns.indexOf(targetRun);
+            this.cursor.offset = targetRun.text.length;
+            insertText = ' ';
           }
+          break;
         }
       }
     }
@@ -1751,6 +1774,12 @@ export class DocumentEngine {
     const after = run.text.substring(this.cursor.offset);
     run.text = before + insertText + after;
     this.cursor.offset += insertText.length;
+
+    // Track changes: record inserted text with its range
+    if (this.document.trackChanges.enabled && insertText) {
+      const endPos: CursorPosition = { ...this.cursor };
+      this.recordChange('insertion', insertText, { blockId: para.id, runIndex: this.cursor.runIndex, offset: this.cursor.offset - insertText.length }, endPos);
+    }
 
     this.selection = { start: { ...this.cursor }, end: { ...this.cursor }, isCollapsed: true };
     this.document.metadata.modifiedAt = new Date().toISOString();
@@ -1793,10 +1822,14 @@ export class DocumentEngine {
     if (!run) return;
 
     if (this.cursor.offset > 0) {
+      const deleted = run.text[this.cursor.offset - 1];
       const before = run.text.substring(0, this.cursor.offset - 1);
       const after = run.text.substring(this.cursor.offset);
       run.text = before + after;
       this.cursor.offset--;
+      if (this.document.trackChanges.enabled && deleted !== undefined) {
+        this.recordChange('deletion', deleted, { blockId: para.id, runIndex: this.cursor.runIndex, offset: this.cursor.offset }, { blockId: para.id, runIndex: this.cursor.runIndex, offset: this.cursor.offset + 1 });
+      }
     } else if (this.cursor.runIndex > 0) {
       const prevRun = para.textRuns[this.cursor.runIndex - 1];
       this.cursor.offset = prevRun.text.length;
@@ -1825,8 +1858,12 @@ export class DocumentEngine {
     this.pushUndo();
 
     if (this.cursor.offset < run.text.length) {
+      const deleted = run.text[this.cursor.offset];
       const before = run.text.substring(0, this.cursor.offset);
       run.text = before + run.text.substring(this.cursor.offset + 1);
+      if (this.document.trackChanges.enabled && deleted !== undefined) {
+        this.recordChange('deletion', deleted, { blockId: para.id, runIndex: this.cursor.runIndex, offset: this.cursor.offset }, { blockId: para.id, runIndex: this.cursor.runIndex, offset: this.cursor.offset + 1 });
+      }
     } else if (this.cursor.runIndex < para.textRuns.length - 1) {
       const nextRun = para.textRuns[this.cursor.runIndex + 1];
       run.text += nextRun.text;
@@ -1996,15 +2033,39 @@ export class DocumentEngine {
     this.pushUndo();
 
     const displayText = text || url;
+    const link = { url, color: '#0563C1', underline: true };
 
     if (!this.selection.isCollapsed) {
-      // Apply hyperlink to selected text
+      // Apply the hyperlink ONLY to the selected range (was: every run in the doc).
+      const startOffset = this.getAbsoluteOffset(this.selection.start);
+      const endOffset = this.getAbsoluteOffset(this.selection.end);
+      const minAbs = Math.min(startOffset, endOffset);
+      const maxAbs = Math.max(startOffset, endOffset);
+
+      let charPos = 0;
       for (const section of this.document.sections) {
         for (const block of section.blocks) {
           if (block.type !== 'paragraph') continue;
           const para = block as Paragraph;
           for (const run of para.textRuns) {
-            run.hyperlink = { url, color: '#0563C1', underline: true };
+            const runStart = charPos;
+            const runEnd = charPos + run.text.length;
+            charPos = runEnd;
+            if (runEnd <= minAbs || runStart >= maxAbs) continue;
+
+            if (runStart < minAbs || runEnd > maxAbs) {
+              const from = Math.max(0, minAbs - runStart);
+              const to = Math.min(run.text.length, maxAbs - runStart);
+              const pieces: TextRun[] = [];
+              if (from > 0) pieces.push({ id: generateId(), text: run.text.substring(0, from), formatting: { ...run.formatting } });
+              pieces.push({ id: generateId(), text: run.text.substring(from, to), formatting: { ...run.formatting, ...link }, hyperlink: { ...link } });
+              if (to < run.text.length) pieces.push({ id: generateId(), text: run.text.substring(to), formatting: { ...run.formatting } });
+              const insertAt = para.textRuns.indexOf(run);
+              if (insertAt >= 0) para.textRuns.splice(insertAt, 1, ...pieces);
+            } else {
+              run.hyperlink = { ...link };
+              run.formatting = { ...run.formatting, ...link };
+            }
           }
         }
       }
@@ -2015,8 +2076,8 @@ export class DocumentEngine {
       const newRun: TextRun = {
         id: generateId(),
         text: displayText,
-        formatting: { color: '#0563C1', underline: true },
-        hyperlink: { url, color: '#0563C1', underline: true },
+        formatting: { ...link },
+        hyperlink: { ...link },
       };
       para.textRuns.splice(this.cursor.runIndex + 1, 0, newRun);
       this.cursor.offset += displayText.length;
@@ -2054,19 +2115,28 @@ export class DocumentEngine {
     while (wordStart > 0 && fullText[wordStart - 1] !== ' ' && fullText[wordStart - 1] !== '\n') wordStart--;
     while (wordEnd < fullText.length && fullText[wordEnd] !== ' ' && fullText[wordEnd] !== '\n') wordEnd++;
 
-    this.setSelection(
-      { blockId: para.id, runIndex: 0, offset: wordStart },
-      { blockId: para.id, runIndex: 0, offset: wordEnd }
-    );
+    // Map paragraph-relative offsets back to (runIndex, offset) pairs.
+    const posAt = (target: number): CursorPosition => {
+      let acc = 0;
+      for (let r = 0; r < para.textRuns.length; r++) {
+        const len = para.textRuns[r].text.length;
+        if (target <= acc + len) return { blockId: para.id, runIndex: r, offset: target - acc };
+        acc += len;
+      }
+      const last = para.textRuns.length - 1;
+      return { blockId: para.id, runIndex: last, offset: para.textRuns[last]?.text.length ?? 0 };
+    };
+    this.setSelection(posAt(wordStart), posAt(wordEnd));
   }
 
   selectLine(): void {
     const para = this.findParagraph(this.cursor.blockId);
     if (!para) return;
-    const textLength = para.textRuns.reduce((sum, r) => sum + r.text.length, 0);
+    // True paragraph selection: start of first run → end of last run
+    // (was: end offset = whole paragraph length on the last run — past its end).
     this.setSelection(
       { blockId: para.id, runIndex: 0, offset: 0 },
-      { blockId: para.id, runIndex: para.textRuns.length - 1, offset: textLength }
+      this.getEndOfBlock(para),
     );
   }
 
@@ -2289,6 +2359,22 @@ export class DocumentEngine {
     this.emit('selection-changed');
   }
 
+  extendSelectionToStartOfLine(): void {
+    if (this.selection.isCollapsed) this.selection.start = { ...this.cursor };
+    this.moveCursorToStartOfLine();
+    this.selection.end = { ...this.cursor };
+    this.selection.isCollapsed = false;
+    this.emit('selection-changed');
+  }
+
+  extendSelectionToEndOfLine(): void {
+    if (this.selection.isCollapsed) this.selection.start = { ...this.cursor };
+    this.moveCursorToEndOfLine();
+    this.selection.end = { ...this.cursor };
+    this.selection.isCollapsed = false;
+    this.emit('selection-changed');
+  }
+
   // ─── Formatting ────────────────────────────────────────────────────────
 
   toggleBold(): void {
@@ -2364,18 +2450,36 @@ export class DocumentEngine {
   }
 
   clearFormatting(): void {
+    // Collapsed caret: reset the pending format for the next typed text only.
     if (this.selection.isCollapsed) {
       this.activeFormatting = {};
       return;
     }
     this.pushUndo();
+    const startOffset = this.getAbsoluteOffset(this.selection.start);
+    const endOffset = this.getAbsoluteOffset(this.selection.end);
+    const minAbs = Math.min(startOffset, endOffset);
+    const maxAbs = Math.max(startOffset, endOffset);
+
+    let charPos = 0;
     for (const section of this.document.sections) {
       for (const block of section.blocks) {
         if (block.type !== 'paragraph') continue;
         const para = block as Paragraph;
         for (const run of para.textRuns) {
-          run.formatting = {};
-          run.hyperlink = undefined;
+          const runStart = charPos;
+          const runEnd = charPos + run.text.length;
+          charPos = runEnd;
+          if (runEnd <= minAbs || runStart >= maxAbs) continue;
+          // Only the selected slice is cleaned; hyperlinks in that slice are removed too.
+          const from = Math.max(0, minAbs - runStart);
+          const to = Math.min(run.text.length, maxAbs - runStart);
+          const pieces: TextRun[] = [];
+          if (from > 0) pieces.push({ id: generateId(), text: run.text.substring(0, from), formatting: { ...run.formatting }, hyperlink: run.hyperlink });
+          pieces.push({ id: generateId(), text: run.text.substring(from, to), formatting: {} });
+          if (to < run.text.length) pieces.push({ id: generateId(), text: run.text.substring(to), formatting: { ...run.formatting }, hyperlink: run.hyperlink });
+          const insertAt = para.textRuns.indexOf(run);
+          if (insertAt >= 0) para.textRuns.splice(insertAt, 1, ...pieces);
         }
       }
     }
@@ -2385,17 +2489,35 @@ export class DocumentEngine {
 
   // ─── Format Painter ────────────────────────────────────────────────────
 
+  /** Formatting captured by the Format Painter, ready to be painted. */
+  private _formatPainterSource: RunFormatting | null = null;
+
   startFormatPainter(): void {
-    if (!this.selection.isCollapsed) {
-      const para = this.findParagraph(this.cursor.blockId);
-      if (para && para.textRuns[this.cursor.runIndex]) {
-        this._formatPainterActive = true;
-      }
-    }
+    const run = this.findParagraph(this.cursor.blockId)?.textRuns[this.cursor.runIndex];
+    if (!run) return;
+    // Capture the format under the caret (or selection anchor) for painting.
+    this._formatPainterSource = { ...run.formatting, ...this.activeFormatting };
+    this._formatPainterActive = true;
+    this.emit('document-changed');
   }
 
   stopFormatPainter(): void {
     this._formatPainterActive = false;
+    this._formatPainterSource = null;
+    this.emit('document-changed');
+  }
+
+  /** Apply the painted format to a selection; returns true when applied. */
+  applyFormatPainter(): boolean {
+    if (!this._formatPainterActive || !this._formatPainterSource || this.selection.isCollapsed) return false;
+    this.applyFormattingToSelection(this._formatPainterSource);
+    // Word returns to inactive after a single paint unless double-clicked.
+    this.stopFormatPainter();
+    return true;
+  }
+
+  isFormatPainterArmed(): boolean {
+    return this._formatPainterActive && !!this._formatPainterSource;
   }
 
 
@@ -2404,33 +2526,49 @@ export class DocumentEngine {
 
   changeCase(caseType: 'sentenceCase' | 'lowerCase' | 'upperCase' | 'capitalizeEachWord' | 'tOGGLEcASE'): void {
     this.pushUndo();
+    // Respect the selection when there is one; otherwise only the cursor paragraph
+    // (previously this rewritten every run in the whole document).
+    const scoped = !this.selection.isCollapsed;
+    const minAbs = scoped ? Math.min(this.getAbsoluteOffset(this.selection.start), this.getAbsoluteOffset(this.selection.end)) : -1;
+    const maxAbs = scoped ? Math.max(this.getAbsoluteOffset(this.selection.start), this.getAbsoluteOffset(this.selection.end)) : -1;
+
+    let charPos = 0;
     for (const section of this.document.sections) {
       for (const block of section.blocks) {
         if (block.type !== 'paragraph') continue;
         const para = block as Paragraph;
         for (const run of para.textRuns) {
+          const runStart = charPos;
+          const runEnd = charPos + run.text.length;
+          charPos = runEnd;
+          if (scoped && (runEnd <= minAbs || runStart >= maxAbs)) continue;
+
+          // Slice boundaries so a partially-selected run only changes the selected part
+          const from = scoped ? Math.max(0, minAbs - runStart) : 0;
+          const to = scoped ? Math.min(run.text.length, maxAbs - runStart) : run.text.length;
+          const head = run.text.substring(0, from);
+          const body = run.text.substring(from, to);
+          const tail = run.text.substring(to);
+
           switch (caseType) {
             case 'sentenceCase':
-              run.text = run.text.replace(/(^\s*[.!?]\s*[a-z]|[a-z])/g, (match, _p1: string, offset: number) => {
-                if (offset === 0) return match.toUpperCase();
-                const prevChar = run.text[offset - 1];
-                if (prevChar === '.' || prevChar === '!' || prevChar === '?') return match.toUpperCase();
-                return match.toLowerCase();
-              });
+              // Capitalize the first letter and letters that follow sentence punctuation.
+              run.text = head + body.replace(/(^\s*[a-z])|([.!?]\s+[a-z])/g, (m) => m.toUpperCase()) + tail;
               break;
             case 'lowerCase':
-              run.text = run.text.toLowerCase();
+              run.text = head + body.toLowerCase() + tail;
               break;
             case 'upperCase':
-              run.text = run.text.toUpperCase();
+              run.text = head + body.toUpperCase() + tail;
               break;
             case 'capitalizeEachWord':
-              run.text = run.text.replace(/\b\w/g, c => c.toUpperCase());
+              run.text = head + body.replace(/\b\w/g, (c) => c.toUpperCase()) + tail;
               break;
             case 'tOGGLEcASE':
-              run.text = run.text.split('').map((c, i) =>
-                i % 2 === 0 ? c.toUpperCase() : c.toLowerCase()
-              ).join('');
+              // Real toggle: flip the existing case of every letter (Word behavior).
+              run.text = head + body.split('').map((c) =>
+                c === c.toUpperCase() ? c.toLowerCase() : c.toUpperCase()
+              ).join('') + tail;
               break;
           }
         }
@@ -2440,6 +2578,7 @@ export class DocumentEngine {
   }
 
   private applyFormattingToSelection(fmt: Partial<RunFormatting>): void {
+    // With a collapsed caret, just record the format for the next typed text.
     if (this.selection.isCollapsed) return;
     this.pushUndo();
 
@@ -2456,10 +2595,24 @@ export class DocumentEngine {
         for (const run of para.textRuns) {
           const runStart = charPos;
           const runEnd = charPos + run.text.length;
-          if (runEnd > minAbs && runStart < maxAbs) {
+          charPos = runEnd;
+          if (runEnd <= minAbs || runStart >= maxAbs) continue;
+
+          // Partially-selected runs must be split so the format only lands
+          // on the selected slice (previously the whole run was formatted,
+          // and runs in unrelated paragraphs were hit too).
+          if (runStart < minAbs || runEnd > maxAbs) {
+            const from = Math.max(0, minAbs - runStart);
+            const to = Math.min(run.text.length, maxAbs - runStart);
+            const pieces: TextRun[] = [];
+            if (from > 0) pieces.push({ id: generateId(), text: run.text.substring(0, from), formatting: { ...run.formatting } });
+            pieces.push({ id: generateId(), text: run.text.substring(from, to), formatting: { ...run.formatting, ...fmt } });
+            if (to < run.text.length) pieces.push({ id: generateId(), text: run.text.substring(to), formatting: { ...run.formatting } });
+            const insertAt = para.textRuns.indexOf(run);
+            if (insertAt >= 0) para.textRuns.splice(insertAt, 1, ...pieces);
+          } else {
             run.formatting = { ...run.formatting, ...fmt };
           }
-          charPos = runEnd;
         }
       }
     }
@@ -2468,20 +2621,46 @@ export class DocumentEngine {
 
   // ─── Paragraph formatting ──────────────────────────────────────────────
 
+  /** Paragraph ids touched by the current selection (or just the cursor's). */
+  private selectedParagraphIds(): Set<ElementId> {
+    const ids = new Set<ElementId>();
+    if (this.selection.isCollapsed) {
+      ids.add(this.cursor.blockId);
+      return ids;
+    }
+    const startOffset = this.getAbsoluteOffset(this.selection.start);
+    const endOffset = this.getAbsoluteOffset(this.selection.end);
+    const minAbs = Math.min(startOffset, endOffset);
+    const maxAbs = Math.max(startOffset, endOffset);
+
+    let charPos = 0;
+    for (const section of this.document.sections) {
+      for (const block of section.blocks) {
+        if (block.type !== 'paragraph') continue;
+        const para = block as Paragraph;
+        const runStart = charPos;
+        const runEnd = charPos + para.textRuns.reduce((sum, r) => sum + r.text.length, 0);
+        charPos = runEnd;
+        // Include a paragraph if the selection starts/ends inside it or covers it
+        if (runEnd > minAbs && runStart < maxAbs) ids.add(para.id);
+        if (minAbs >= runStart && minAbs < runEnd) ids.add(para.id);
+        if (maxAbs > runStart && maxAbs <= runEnd) ids.add(para.id);
+      }
+    }
+    return ids;
+  }
+
   setAlignment(alignment: Alignment): void {
     this.pushUndo();
-    if (!this.selection.isCollapsed) {
-      // Apply to all paragraphs in selection
-      for (const section of this.document.sections) {
-        for (const block of section.blocks) {
-          if (block.type === 'paragraph') {
-            (block as Paragraph).formatting.alignment = alignment;
-          }
+    // Apply to the selected paragraphs (or the cursor's paragraph),
+    // never to the whole document (was: every paragraph).
+    const targets = this.selectedParagraphIds();
+    for (const section of this.document.sections) {
+      for (const block of section.blocks) {
+        if (block.type === 'paragraph' && targets.has(block.id)) {
+          (block as Paragraph).formatting.alignment = alignment;
         }
       }
-    } else {
-      const para = this.findParagraph(this.cursor.blockId);
-      if (para) para.formatting.alignment = alignment;
     }
     this.emit('document-changed');
   }
@@ -2672,21 +2851,16 @@ export class DocumentEngine {
     const styleDef = this.document.styles.find(s => s.name === styleName);
     if (!styleDef) return;
 
-    const para = this.findParagraph(this.cursor.blockId);
-    if (para) {
-      para.style = styleName;
-      para.formatting = cloneFormatting(styleDef.paragraphFormatting);
-      if (!this.selection.isCollapsed) {
-        // Apply run formatting to selection
-        for (const section of this.document.sections) {
-          for (const block of section.blocks) {
-            if (block.type !== 'paragraph') continue;
-            const p = block as Paragraph;
-            p.style = styleName;
-            for (const run of p.textRuns) {
-              run.formatting = { ...run.formatting, ...styleDef.runFormatting };
-            }
-          }
+    // Apply to the selection's paragraphs (or the cursor paragraph) only.
+    const targets = this.selectedParagraphIds();
+    for (const section of this.document.sections) {
+      for (const block of section.blocks) {
+        if (block.type !== 'paragraph' || !targets.has(block.id)) continue;
+        const p = block as Paragraph;
+        p.style = styleName;
+        p.formatting = cloneFormatting(styleDef.paragraphFormatting);
+        for (const run of p.textRuns) {
+          run.formatting = { ...run.formatting, ...styleDef.runFormatting };
         }
       }
     }
@@ -2789,29 +2963,87 @@ export class DocumentEngine {
       while (copy.length < cols) copy.push('');
       return copy;
     });
-    this.insertTable(rows, cols);
-    // insertTable leaves an empty paragraph after the table; fill the cells
+    // Insert the table and remember its id so we fill exactly this one
+    // (was: any empty table with matching dims could be targeted).
+    this.pushUndo();
+    const found = this.findBlock(this.cursor.blockId);
+    if (!found) { this.undoStack.pop(); return; }
+
+    const tableRows: TableRow[] = [];
+    for (let r = 0; r < rows; r++) {
+      const cells: TableCell[] = [];
+      for (let c = 0; c < cols; c++) {
+        cells.push({
+          id: generateId(),
+          textRuns: [{ id: generateId(), text: '', formatting: {} }],
+          paragraphs: [],
+          rowSpan: 1, colSpan: 1,
+          borders: defaultCellBorders(),
+          verticalAlignment: 'top',
+          width: Math.floor(9000 / cols),
+          cellWidthType: 'auto',
+          shading: { fill: 'auto', pattern: 'clear', color: 'auto' },
+          textDirection: 'ltr',
+          margins: defaultCellMargins(),
+          noWrap: false,
+        });
+      }
+      tableRows.push({
+        id: generateId(), cells,
+        height: 0, heightType: 'auto',
+        headerRow: r === 0, cantSplit: false, tableHeader: r === 0,
+      });
+    }
+
+    const table: Table = {
+      id: generateId(), type: 'table', rows: tableRows,
+      columnWidths: Array(cols).fill(Math.floor(9000 / cols)),
+      headerRow: true,
+      tableBorders: {
+        top: { style: 'single', size: 4, color: '#000000', space: 0 },
+        bottom: { style: 'single', size: 4, color: '#000000', space: 0 },
+        left: { style: 'single', size: 4, color: '#000000', space: 0 },
+        right: { style: 'single', size: 4, color: '#000000', space: 0 },
+        insideH: { style: 'single', size: 4, color: '#000000', space: 0 },
+        insideV: { style: 'single', size: 4, color: '#000000', space: 0 },
+      },
+      tableLook: { firstRow: true, lastRow: false, firstColumn: false, lastColumn: false, noHorizontalBand: false, noVerticalBand: false },
+      indentation: 0, tableWidth: 0, tableWidthType: 'auto', overlap: false,
+      cellMarginDefault: defaultCellMargins(), tableLayout: 'autofit', bidi: false,
+    };
+
+    const emptyPara: Paragraph = {
+      id: generateId(), type: 'paragraph',
+      textRuns: [{ id: generateId(), text: '', formatting: {} }],
+      formatting: defaultParagraphFormatting(), style: 'Normal', footnotes: [], endnotes: [],
+    };
+
+    found.section.blocks.splice(found.blockIndex + 1, 0, table, emptyPara);
+    this.cursor = { blockId: emptyPara.id, runIndex: 0, offset: 0 };
+    this.selection = { start: { ...this.cursor }, end: { ...this.cursor }, isCollapsed: true };
+    this.document.metadata.modifiedAt = new Date().toISOString();
+    this.emitAll();
+
+    // Fill the cells of the table we just created (single undoable step together
+    // with the insert? keep two steps for parity with insertTable flow).
+    const tableId = table.id;
     this.transformDocument((doc) => {
-      let filled = false;
       for (const s of doc.sections) {
         for (const b of s.blocks) {
-          if (b.type !== 'table' || b.rows.length !== rows || b.columnWidths.length !== cols) continue;
-          // Only touch the table we just inserted (its cells are all empty)
-          const isEmpty = b.rows.every((row) => row.cells.every((c) => !c.textRuns.some((r) => r.text)));
-          if (!isEmpty) continue;
-          for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-              const cell = b.rows[r]?.cells[c];
-              if (cell && cell.textRuns[0]) {
-                cell.textRuns[0].text = normalized[r][c];
-                filled = true;
+          if (b.type === 'table' && b.id === tableId) {
+            for (let r = 0; r < rows; r++) {
+              for (let c = 0; c < cols; c++) {
+                const cell = b.rows[r]?.cells[c];
+                if (cell && cell.textRuns[0]) {
+                  cell.textRuns[0].text = normalized[r][c];
+                }
               }
             }
+            return true;
           }
-          if (filled) return true;
         }
       }
-      return filled;
+      return false;
     });
   }
 
@@ -2985,13 +3217,24 @@ export class DocumentEngine {
     };
     this.document.comments.push(comment);
 
-    // Add comment ID to runs in selection
+    // Add comment ID to runs intersecting the selection range only
+    // (was: every run of every paragraph in the document).
     if (!this.selection.isCollapsed) {
+      const startOffset = this.getAbsoluteOffset(this.selection.start);
+      const endOffset = this.getAbsoluteOffset(this.selection.end);
+      const minAbs = Math.min(startOffset, endOffset);
+      const maxAbs = Math.max(startOffset, endOffset);
+
+      let charPos = 0;
       for (const section of this.document.sections) {
         for (const block of section.blocks) {
           if (block.type !== 'paragraph') continue;
           const para = block as Paragraph;
           for (const run of para.textRuns) {
+            const runStart = charPos;
+            const runEnd = charPos + run.text.length;
+            charPos = runEnd;
+            if (runEnd <= minAbs || runStart >= maxAbs) continue;
             if (!run.commentIds) run.commentIds = [];
             run.commentIds.push(comment.id);
           }
@@ -3031,6 +3274,21 @@ export class DocumentEngine {
 
   // ─── Track Changes ─────────────────────────────────────────────────────
 
+  /** Record a track-changes entry when tracking is on (no-op otherwise). */
+  private recordChange(type: TrackChange['type'], content: string, rangeStart: CursorPosition, rangeEnd: CursorPosition): void {
+    if (!this.document.trackChanges.enabled) return;
+    this.document.trackChanges.changes.push({
+      id: generateId(),
+      type,
+      author: this.document.trackChanges.author || 'User',
+      date: new Date().toISOString(),
+      content,
+      rangeStart: { ...rangeStart },
+      rangeEnd: { ...rangeEnd },
+    });
+    this.emit('track-changes-changed');
+  }
+
   toggleTrackChanges(): void {
     this.document.trackChanges.enabled = !this.document.trackChanges.enabled;
     this.emit('track-changes-changed');
@@ -3045,10 +3303,11 @@ export class DocumentEngine {
     const change = this.document.trackChanges.changes.find(c => c.id === changeId);
     if (!change) return;
 
-    if (change.type === 'insertion') {
-      // Keep the text
-    } else if (change.type === 'deletion') {
-      // Already removed
+    if (change.type === 'deletion' && change.content) {
+      // The text was already removed from the document — accepting keeps it removed.
+      // Nothing to change in the body.
+    } else if (change.type === 'insertion') {
+      // Inserted text stays. Nothing to change in the body.
     }
     this.document.trackChanges.changes = this.document.trackChanges.changes.filter(c => c.id !== changeId);
     this.emit('track-changes-changed');
@@ -3060,10 +3319,12 @@ export class DocumentEngine {
     const change = this.document.trackChanges.changes.find(c => c.id === changeId);
     if (!change) return;
 
-    if (change.type === 'insertion') {
-      // Remove the text
-    } else if (change.type === 'deletion') {
-      // Restore the text
+    if (change.type === 'insertion' && change.content) {
+      // Undo the insertion: remove that text via absolute offsets.
+      this.deleteAbsoluteRange(change.rangeStart, change.rangeEnd);
+    } else if (change.type === 'deletion' && change.content) {
+      // Restore the deleted text at its recorded range.
+      this.insertAbsoluteText(change.content, change.rangeStart);
     }
     this.document.trackChanges.changes = this.document.trackChanges.changes.filter(c => c.id !== changeId);
     this.emit('track-changes-changed');
@@ -3079,9 +3340,64 @@ export class DocumentEngine {
 
   rejectAllChanges(): void {
     this.pushUndo();
+    // Reject in reverse order so earlier absolute offsets stay valid.
+    const changes = [...this.document.trackChanges.changes].reverse();
+    for (const change of changes) {
+      if (change.type === 'insertion' && change.content) {
+        this.deleteAbsoluteRange(change.rangeStart, change.rangeEnd);
+      } else if (change.type === 'deletion' && change.content) {
+        this.insertAbsoluteText(change.content, change.rangeStart);
+      }
+    }
     this.document.trackChanges.changes = [];
     this.emit('track-changes-changed');
     this.emit('document-changed');
+  }
+
+  /** Delete the text between two absolute positions. */
+  private deleteAbsoluteRange(start: CursorPosition, end: CursorPosition): void {
+    const a = this.getAbsoluteOffset(start);
+    const b = this.getAbsoluteOffset(end);
+    const min = Math.min(a, b);
+    const max = Math.max(a, b);
+    if (max <= min) return;
+    let charPos = 0;
+    for (const section of this.document.sections) {
+      for (const block of section.blocks) {
+        if (block.type !== 'paragraph') continue;
+        const para = block as Paragraph;
+        for (const run of para.textRuns) {
+          const runStart = charPos;
+          const runEnd = charPos + run.text.length;
+          charPos = runEnd;
+          if (runEnd <= min || runStart >= max) continue;
+          const from = Math.max(0, min - runStart);
+          const to = Math.min(run.text.length, max - runStart);
+          run.text = run.text.substring(0, from) + run.text.substring(to);
+        }
+      }
+    }
+    for (const section of this.document.sections) {
+      for (const block of section.blocks) {
+        if (block.type !== 'paragraph') continue;
+        const para = block as Paragraph;
+        para.textRuns = para.textRuns.filter(r => r.text.length > 0);
+        if (para.textRuns.length === 0) para.textRuns.push({ id: generateId(), text: '', formatting: {} });
+      }
+    }
+  }
+
+  /** Insert text at an absolute position (used to restore rejected deletions). */
+  private insertAbsoluteText(text: string, at: CursorPosition): void {
+    const abs = this.getAbsoluteOffset(at);
+    const pos = this.positionFromAbsoluteOffset(Math.min(abs, this.getAllText().length));
+    const para = this.findParagraph(pos.blockId);
+    if (!para) return;
+    while (para.textRuns.length <= pos.runIndex) {
+      para.textRuns.push({ id: generateId(), text: '', formatting: {} });
+    }
+    const run = para.textRuns[pos.runIndex];
+    run.text = run.text.substring(0, pos.offset) + text + run.text.substring(pos.offset);
   }
 
   // ─── Watermark ─────────────────────────────────────────────────────────
@@ -3120,7 +3436,7 @@ export class DocumentEngine {
       A5: { width: 8396, height: 11906 },
       B4: { width: 14740, height: 20874 },
       B5: { width: 10620, height: 14740 },
-      ' executive': { width: 10440, height: 15120 },
+      'executive': { width: 10440, height: 15120 },
       statement: { width: 7920, height: 12240 },
       envelope: { width: 12240, height: 8640 },
       '8x10': { width: 11520, height: 14400 },
@@ -3143,24 +3459,19 @@ export class DocumentEngine {
 
   setOrientation(orientation: 'portrait' | 'landscape'): void {
     this.pushUndo();
-    const setup = this.document.pageSetup;
-    if ((setup.orientation === 'portrait' && orientation === 'landscape') ||
-        (setup.orientation === 'landscape' && orientation === 'portrait')) {
-      const temp = setup.pageWidth;
-      setup.pageWidth = setup.pageHeight;
-      setup.pageHeight = temp;
-    }
-    setup.orientation = orientation;
-    for (const section of this.document.sections) {
-      section.properties.orientation = orientation;
-      const sp = section.properties;
-      if ((sp.orientation === 'portrait' && orientation === 'landscape') ||
-          (sp.orientation === 'landscape' && orientation === 'portrait')) {
+    // Swap when the requested orientation differs from the CURRENT one,
+    // computed per section (was: stale check that swapped some sections twice).
+    const swapIfNeeded = (sp: { orientation: 'portrait' | 'landscape'; pageWidth: number; pageHeight: number }) => {
+      if (sp.orientation !== orientation) {
         const temp = sp.pageWidth;
         sp.pageWidth = sp.pageHeight;
         sp.pageHeight = temp;
+        sp.orientation = orientation;
       }
-      sp.orientation = orientation;
+    };
+    swapIfNeeded(this.document.pageSetup);
+    for (const section of this.document.sections) {
+      swapIfNeeded(section.properties);
     }
     this.emit('document-changed');
   }
@@ -3286,6 +3597,55 @@ export class DocumentEngine {
   }
 
   updateTableOfContents(): void {
+    // Replace the most recent TOC's paragraphs instead of stacking a second TOC
+    // (was: insertTableOfContents() again → duplicated entry blocks).
+    const existing = this.document.tableOfContents[this.document.tableOfContents.length - 1];
+    if (existing) {
+      // Remove previously generated TOC paragraphs (identified by the TOC title style
+      // plus generated dot-leader runs) and re-insert fresh ones at the same spot.
+      const found = this.document.sections
+        .flatMap((s) => s.blocks)
+        .findIndex((b) => b.type === 'paragraph' && (b as Paragraph).style === 'TOCHeading');
+      if (found >= 0) {
+        // locate section + index
+        let si = 0, bi = -1;
+        for (let i = 0; i < this.document.sections.length; i++) {
+          const idx = this.document.sections[i].blocks.findIndex(
+            (b) => b.type === 'paragraph' && (b as Paragraph).style === 'TOCHeading');
+          if (idx >= 0) { si = i; bi = idx; break; }
+        }
+        if (bi >= 0) {
+          const section = this.document.sections[si];
+          // Remove TOC title and everything until the first non-TOC paragraph
+          // (TOC entries are plain Normal paragraphs directly after the title).
+          let end = bi + 1;
+          while (end < section.blocks.length) {
+            const b = section.blocks[end];
+            if (b.type !== 'paragraph') break;
+            const p = b as Paragraph;
+            if (p.style !== 'Normal' || /^Heading/.test(p.style)) break;
+            // stop at a paragraph that has real content style markers
+            end++;
+          }
+          // Guard: do not swallow body text — only remove blocks whose text
+          // matches a previously generated TOC entry (dot leader pattern).
+          const isGeneratedToc = (b: Block) => {
+            if (b.type !== 'paragraph') return false;
+            const p = b as Paragraph;
+            if (p.style !== 'Normal') return false;
+            const text = p.textRuns.map((r) => r.text).join('');
+            return /\.{3,}\s*\d+\s*$/.test(text) || text === 'Table of Contents';
+          };
+          let removeEnd = bi + 1;
+          while (removeEnd < section.blocks.length && isGeneratedToc(section.blocks[removeEnd])) removeEnd++;
+          section.blocks.splice(bi, removeEnd - bi);
+          const cursorBefore = this.cursor.blockId;
+          this.cursor = { blockId: section.blocks[Math.max(0, bi - 1)]?.id ?? cursorBefore, runIndex: 0, offset: 0 };
+          this.insertTableOfContents();
+          return;
+        }
+      }
+    }
     this.insertTableOfContents();
   }
 
@@ -3463,15 +3823,28 @@ export class DocumentEngine {
     return results;
   }
 
-  replaceText(find: string, replace: string, caseSensitive: boolean = false, wholeWord: boolean = false): number {
+  /**
+   * Replace occurrences of `find`.
+   * - With `onlyAt` provided (single-replace flow), exactly that occurrence is replaced.
+   * - Otherwise every occurrence is replaced in one pass (no find→replace→find
+   *   re-scan, so replacing "x" with "xx" cannot loop forever).
+   */
+  replaceText(find: string, replace: string, caseSensitive: boolean = false, wholeWord: boolean = false, onlyAt?: CursorPosition): number {
+    if (!find) return 0;
     const results = this.findText(find, caseSensitive, wholeWord);
     if (results.length === 0) return 0;
+
+    const targets = onlyAt
+      ? results.filter((r) => r.blockId === onlyAt.blockId && r.runIndex === onlyAt.runIndex && r.offset === onlyAt.offset).slice(0, 1)
+      : results;
+    if (targets.length === 0) return 0;
 
     this.pushUndo();
     let count = 0;
 
-    for (let i = results.length - 1; i >= 0; i--) {
-      const pos = results[i];
+    // Replace from the end backwards so earlier offsets stay valid.
+    for (let i = targets.length - 1; i >= 0; i--) {
+      const pos = targets[i];
       const para = this.findParagraph(pos.blockId);
       if (!para) continue;
       const run = para.textRuns[pos.runIndex];
@@ -3489,13 +3862,9 @@ export class DocumentEngine {
   }
 
   replaceAllText(find: string, replace: string, caseSensitive: boolean = false, wholeWord: boolean = false): number {
-    let totalReplaced = 0;
-    let results = this.findText(find, caseSensitive, wholeWord);
-    while (results.length > 0) {
-      totalReplaced += this.replaceText(find, replace, caseSensitive, wholeWord);
-      results = this.findText(find, caseSensitive, wholeWord);
-    }
-    return totalReplaced;
+    // Single forward pass; never re-searches replaced text, so a replacement
+    // that contains the search string ("x" → "xx") cannot loop forever.
+    return this.replaceText(find, replace, caseSensitive, wholeWord);
   }
 
   // ─── Go To ─────────────────────────────────────────────────────────────

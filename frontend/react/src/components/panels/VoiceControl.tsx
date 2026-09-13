@@ -60,8 +60,13 @@ export const VoiceControl: React.FC = () => {
       'doc.health': 'ai.health',
       'doc.test': 'doc.test',
       'edit.save': 'doc.save',
-      'palette.open': 'palette.open',
+      // The command palette dialog is opened through the UI store — there is
+      // no registry command with this id (was: 'palette.open' → not found).
     };
+    if (interp.id === 'palette.open') {
+      ui.openDialog('commandPalette');
+      return;
+    }
     const registryId = map[interp.id];
     const cmd = commands.find((c) => c.id === registryId);
     if (cmd) {

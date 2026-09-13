@@ -230,6 +230,11 @@
   border-color: rgba(196, 43, 28, 0.4);
 }
 
+[data-theme='dark'] .inline-ai-status.is-error {
+  border-color: rgba(248, 113, 113, 0.45);
+  background: rgba(248, 113, 113, 0.08);
+}
+
 .is-error-text {
   max-width: 340px;
 }

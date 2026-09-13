@@ -33,14 +33,20 @@ export const Ruler: React.FC<RulerProps> = ({ zoom }) => {
       if (!ruler) return;
       const rect = ruler.getBoundingClientRect();
       const x = e.clientX - rect.left;
+      // Convert on-screen px → twips: px ÷ (96 dpi × zoom) × 20 twips/pt…
+      // pageWidth is stored in twips at 1440 per inch, so pxPerTwip accounts
+      // for zoom. (Was: a mystery ×10 factor that moved margins ~10× too far.)
+      const pxPerTwip = (96 * zoom / 100) / 1440;
 
       if (isDragging === 'leftMargin') {
-        const newMargin = Math.max(0, Math.min(x * (1 / (96 * zoom / 100)) * 20 * 10, pageSetup.pageWidth - pageSetup.pageMargins.right - 1440));
-        engine.setPageMargins({ left: Math.round(newMargin) });
+        const newMargin = x / pxPerTwip;
+        const max = pageSetup.pageWidth - pageSetup.pageMargins.right - 1440;
+        engine.setPageMargins({ left: Math.round(Math.max(0, Math.min(newMargin, max))) });
       } else if (isDragging === 'rightMargin') {
         const rightEdge = rect.width;
-        const newMargin = Math.max(0, Math.min((rightEdge - x) * (1 / (96 * zoom / 100)) * 20 * 10, pageSetup.pageWidth - pageSetup.pageMargins.left - 1440));
-        engine.setPageMargins({ right: Math.round(newMargin) });
+        const newMargin = (rightEdge - x) / pxPerTwip;
+        const max = pageSetup.pageWidth - pageSetup.pageMargins.left - 1440;
+        engine.setPageMargins({ right: Math.round(Math.max(0, Math.min(newMargin, max))) });
       }
     };
 

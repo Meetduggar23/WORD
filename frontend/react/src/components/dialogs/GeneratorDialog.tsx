@@ -43,7 +43,10 @@ export const GeneratorDialog: React.FC<{ onClose: () => void }> = ({ onClose }) 
     setError(null);
     setLoading(true);
     try {
-      if (aiService.isConfigured && aiService.privacy === 'cloud' || aiService.configSnapshot.kind !== 'local') {
+      // Only try AI when a non-local provider is actually configured
+      // (was: `A && B || C` precedence bug that could attempt AI with local).
+      const wantsAI = aiService.isConfigured && aiService.configSnapshot.kind !== 'local';
+      if (wantsAI) {
         const prompt = topic.trim()
           ? `Generate a ${kind.toLowerCase()} outline about: ${topic.trim()}`
           : `Generate a typical ${kind.toLowerCase()} outline`;
@@ -68,8 +71,12 @@ export const GeneratorDialog: React.FC<{ onClose: () => void }> = ({ onClose }) 
       setOutline(TEMPLATES[kind] ?? ['Introduction', 'Main Content', 'Conclusion']);
       setUsedAI(false);
     } catch (e) {
+      // AI failed — fall back to the built-in template instead of dead-ending
+      // the dialog with a raw provider error.
+      setOutline(TEMPLATES[kind] ?? ['Introduction', 'Main Content', 'Conclusion']);
+      setUsedAI(false);
       const message = e instanceof AIProviderError ? e.message : 'The AI request failed.';
-      setError(message);
+      setError(`AI unavailable (${message}) — using the built-in ${kind} template instead.`);
     } finally {
       setLoading(false);
     }
@@ -79,10 +86,10 @@ export const GeneratorDialog: React.FC<{ onClose: () => void }> = ({ onClose }) 
     if (!outline) return;
     engine.newDocument();
     engine.setDocumentTitle(topic.trim() || `${kind}`);
-    outline.forEach((section, i) => {
-      if (i > 0) engine.insertParagraph();
+    outline.forEach((section) => {
       engine.insertText(section);
-      engine.applyStyle(i === 0 ? 'Heading1' : 'Heading1');
+      engine.applyStyle('Heading1');
+      engine.insertParagraph();
     });
     ui.setRightPanel(null);
     toast('success', 'Document created', `${outline.length} sections ready — fill them in.`);

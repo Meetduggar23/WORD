@@ -281,6 +281,28 @@ const AppShell: React.FC = () => {
     setShowFileMenu(false);
   }, [tabs, activeTabId, engine, stashActive]);
 
+  /* ---------- New document requests from FileMenu (tab-aware) ----------
+     Dispatched as an event so FileMenu never touches the engine directly;
+     the shell stashes the current document into its tab first. */
+  useEffect(() => {
+    const onNewDocument = (e: Event) => {
+      const detail = (e as CustomEvent<{ templateName?: string }>).detail;
+      const template: TemplateDef | undefined = detail?.templateName
+        ? {
+            id: detail.templateName.toLowerCase(),
+            name: detail.templateName,
+            description: '',
+            icon: null,
+            accent: '#1b6ac9',
+            blocks: [{ text: '' }],
+          }
+        : undefined;
+      createNewDocument(template);
+    };
+    window.addEventListener('word:new-document', onNewDocument);
+    return () => window.removeEventListener('word:new-document', onNewDocument);
+  }, [createNewDocument]);
+
   const selectTab = useCallback((id: string) => {
     if (id === activeTabId) return;
     const stashed = stashActive(tabs, activeTabId);

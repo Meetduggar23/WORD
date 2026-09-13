@@ -7,6 +7,42 @@
   transition: background-color var(--transition-normal);
 }
 
+/* ─── Print: only the document pages, no app chrome ─────────────────── */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .document-canvas-wrapper,
+  .document-canvas-wrapper * {
+    visibility: visible;
+  }
+  .document-canvas-wrapper {
+    position: absolute;
+    inset: 0;
+    padding: 0;
+    overflow: visible;
+    background: #fff;
+  }
+  .document-canvas {
+    transform: none !important;
+    display: block;
+  }
+  .canvas-workspace {
+    gap: 0;
+  }
+  .document-section {
+    animation: none;
+    break-after: page;
+  }
+  .editor-cursor,
+  .page-border,
+  .floating-toolbar,
+  .inline-suggestion,
+  .inline-ai-status {
+    display: none !important;
+  }
+}
+
 .document-canvas {
   display: flex;
   justify-content: center;

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useDocumentEngine } from '../../hooks/useDocumentEngine';
+import { Paragraph } from '../../engine/DocumentEngine';
 import './PropertiesPanel.css';
 
 type PanelTab = 'character' | 'paragraph' | 'styles' | 'document';
@@ -8,6 +9,13 @@ export const PropertiesPanel: React.FC = () => {
   const engine = useDocumentEngine();
   const [activeTab, setActiveTab] = useState<PanelTab>('character');
   const [selectedStyle, setSelectedStyle] = useState('');
+
+  // Live paragraph under the cursor so indent/spacing inputs show real values
+  // (was: hardcoded 0s and a line-spacing select locked to "1.15").
+  const cursorPara = (engine.document?.sections
+    .flatMap((s) => s.blocks)
+    .find((b) => b.id === engine.cursorPosition.blockId) as Paragraph | undefined) ?? null;
+  const pf = cursorPara?.formatting;
 
   const tabs: { id: PanelTab; label: string }[] = [
     { id: 'character', label: 'Aa' },
@@ -171,7 +179,7 @@ export const PropertiesPanel: React.FC = () => {
                 <input
                   type="number"
                   className="pp-number"
-                  value={0}
+                  value={pf?.rightIndent ?? 0}
                   onChange={(e) => engine.setRightIndent(Number(e.target.value))}
                   step={72}
                 />
@@ -182,7 +190,7 @@ export const PropertiesPanel: React.FC = () => {
                 <input
                   type="number"
                   className="pp-number"
-                  value={0}
+                  value={pf?.firstLineIndent ?? 0}
                   onChange={(e) => engine.setFirstLineIndent(Number(e.target.value))}
                   step={72}
                 />
@@ -197,7 +205,7 @@ export const PropertiesPanel: React.FC = () => {
                 <input
                   type="number"
                   className="pp-number"
-                  value={0}
+                  value={pf?.spaceBefore ?? 0}
                   onChange={(e) => engine.setSpaceBefore(Number(e.target.value))}
                   step={60}
                 />
@@ -208,7 +216,7 @@ export const PropertiesPanel: React.FC = () => {
                 <input
                   type="number"
                   className="pp-number"
-                  value={0}
+                  value={pf?.spaceAfter ?? 0}
                   onChange={(e) => engine.setSpaceAfter(Number(e.target.value))}
                   step={60}
                 />
@@ -220,7 +228,7 @@ export const PropertiesPanel: React.FC = () => {
               <label className="pp-label">Line Spacing</label>
               <select
                 className="pp-select full"
-                value="1.15"
+                value={String(pf?.lineSpacing ?? 1.15)}
                 onChange={(e) => engine.setLineSpacing(Number(e.target.value))}
               >
                 <option value="1.0">Single</option>

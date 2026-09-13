@@ -57,6 +57,8 @@ interface DocumentEngineContextType {
   startFormatPainter: () => void;
   stopFormatPainter: () => void;
   isFormatPainterActive: boolean;
+  applyFormatPainter: () => boolean;
+  isFormatPainterArmed: boolean;
 
   // Paragraph formatting
   setLineSpacing: (value: number, rule?: 'auto' | 'exact' | 'atLeast') => void;
@@ -287,6 +289,7 @@ export const DocumentEngineProvider: React.FC<DocumentEngineProviderProps> = ({ 
 
   const startFormatPainter = cb(() => engine.startFormatPainter(), [engine]);
   const stopFormatPainter = cb(() => engine.stopFormatPainter(), [engine]);
+  const applyFormatPainter = cb(() => engine.applyFormatPainter(), [engine]);
 
   const setLineSpacing = cb((v: number, r?: any) => engine.setLineSpacing(v, r), [engine]);
   const setSpaceBefore = cb((v: number) => engine.setSpaceBefore(v), [engine]);
@@ -398,7 +401,9 @@ export const DocumentEngineProvider: React.FC<DocumentEngineProviderProps> = ({ 
     toggleDoubleStrikethrough, toggleSuperscript, toggleSubscript, toggleSmallCaps, toggleAllCaps,
     setFontFamily, setFontSize, setTextColor, setHighlight, setAlignment,
     setCharacterSpacing, clearFormatting, changeCase,
-    startFormatPainter, stopFormatPainter, isFormatPainterActive: engine.isFormatPainterActive(),
+    startFormatPainter, stopFormatPainter, applyFormatPainter,
+    isFormatPainterActive: engine.isFormatPainterActive(),
+    isFormatPainterArmed: engine.isFormatPainterArmed(),
     setLineSpacing, setSpaceBefore, setSpaceAfter, setLeftIndent, setRightIndent, setFirstLineIndent,
     togglePageBreakBefore, toggleKeepWithNext, toggleKeepLinesTogether,
     setBulletList, setNumberedList, setMultilevelList, increaseListLevel, decreaseListLevel,

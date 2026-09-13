@@ -2,7 +2,7 @@
   position: fixed;
   inset: 0;
   z-index: 950;
-  background: rgba(10, 16, 30, 0.45);
+  background: var(--overlay-scrim);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   display: flex;

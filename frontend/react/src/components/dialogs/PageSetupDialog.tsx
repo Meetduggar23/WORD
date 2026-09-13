@@ -18,12 +18,17 @@ export const PageSetupDialog: React.FC<PageSetupDialogProps> = ({ onClose }) => 
     normal: { top: 1440, bottom: 1440, left: 1800, right: 1800 },
     narrow: { top: 720, bottom: 720, left: 720, right: 720 },
     moderate: { top: 1440, bottom: 1440, left: 1080, right: 1080 },
-    wide: { top: 1440, bottom: 1440, left: 1800, right: 1800 },
+    wide: { top: 1440, bottom: 1440, left: 2880, right: 2880 },
   };
   const handleApply = () => {
     engine.setPageSize(pageSize);
     engine.setOrientation(orientation);
-    engine.setPageMargins(margins);
+    engine.setPageMargins({
+      ...margins,
+      gutter,
+      headerFromEdge: headerDist,
+      footerFromEdge: footerDist,
+    });
     engine.setColumns(columns);
     onClose();
   };

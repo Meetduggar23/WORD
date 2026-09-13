@@ -5,9 +5,23 @@
     <link rel="icon" type="image/png" href="/newlogo.png" />
     <link rel="apple-touch-icon" href="/newlogo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#1b3a5c" />
     <title>WORD — Professional Document Editor</title>
     <meta name="description" content="WORD — a premium, modern word processing and document editing experience." />
+    <script>
+      // Apply theme before first paint: prevents the light-theme flash for
+      // dark-mode users. Mirrors useTheme.tsx (same key + resolution logic).
+      (function () {
+        try {
+          var t = localStorage.getItem('word.theme');
+          if (t !== 'light' && t !== 'dark' && t !== 'system') t = 'system';
+          var dark = t === 'dark' || (t === 'system' &&
+            window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          var r = document.documentElement;
+          r.setAttribute('data-theme', dark ? 'dark' : 'light');
+          r.style.colorScheme = dark ? 'dark' : 'light';
+        } catch (e) { /* storage unavailable — stay light */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -15,7 +15,7 @@ export const DocumentCanvas: React.FC<DocumentCanvasProps> = ({ zoom }) => {
   const {
     document: doc, selection, insertText, deleteBackward, deleteForward,
     insertParagraph, toggleBold, toggleItalic, toggleUnderline,
-    selectAll, engine,
+    selectAll, engine, setAlignment,
     decreaseListLevel, insertHyperlink, setFontSize,
     undo, redo, setSelection,
   } = useDocumentEngine();
@@ -211,6 +211,8 @@ export const DocumentCanvas: React.FC<DocumentCanvasProps> = ({ zoom }) => {
         if (startPos && endPos) {
           const [s, e] = orderPositions(startPos, endPos);
           setSelection(s, e);
+          // Format Painter: apply captured formatting to the just-made selection
+          engine.applyFormatPainter();
         }
       }
     };
@@ -239,7 +241,7 @@ export const DocumentCanvas: React.FC<DocumentCanvasProps> = ({ zoom }) => {
 
     window.addEventListener('mouseup', handleMouseUp);
     return () => window.removeEventListener('mouseup', handleMouseUp);
-  }, [hitTest, setSelection, orderPositions]);
+  }, [hitTest, setSelection, orderPositions, engine]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     // Only left button on text areas
@@ -308,8 +310,44 @@ export const DocumentCanvas: React.FC<DocumentCanvasProps> = ({ zoom }) => {
           if (url) insertHyperlink(url);
           return;
         }
-        case ']': e.preventDefault(); setFontSize(Math.min(72, (engine.getActiveFormatting().fontSize || 11) + 2)); return;
-        case '[': e.preventDefault(); setFontSize(Math.max(8, (engine.getActiveFormatting().fontSize || 11) - 2)); return;
+        // Paragraph alignment shortcuts (Word: Ctrl+E/L/R/J)
+        case 'e': e.preventDefault(); setAlignment('center'); return;
+        case 'l': e.preventDefault(); setAlignment('left'); return;
+        case 'r': e.preventDefault(); setAlignment('right'); return;
+        case 'j': e.preventDefault(); setAlignment('justify'); return;
+        case ']': {
+          e.preventDefault();
+          // Grow the effective size of the selection (or pending format),
+          // not just the pending format (was: activeFormatting.fontSize ?? 11).
+          const sel = engine.getSelection();
+          let base = engine.getActiveFormatting().fontSize || 11;
+          if (!sel.isCollapsed) {
+            const text = engine.getSelectedText();
+            const para = engine.findParagraph(sel.end.blockId);
+            if (para && text) {
+              // Use the size of the first formatted run in the selection
+              const run = para.textRuns[Math.min(sel.end.runIndex, para.textRuns.length - 1)];
+              if (run?.formatting.fontSize) base = run.formatting.fontSize;
+            }
+          }
+          setFontSize(Math.min(72, base + 2));
+          return;
+        }
+        case '[': {
+          e.preventDefault();
+          const sel = engine.getSelection();
+          let base = engine.getActiveFormatting().fontSize || 11;
+          if (!sel.isCollapsed) {
+            const text = engine.getSelectedText();
+            const para = engine.findParagraph(sel.end.blockId);
+            if (para && text) {
+              const run = para.textRuns[Math.min(sel.end.runIndex, para.textRuns.length - 1)];
+              if (run?.formatting.fontSize) base = run.formatting.fontSize;
+            }
+          }
+          setFontSize(Math.max(8, base - 2));
+          return;
+        }
         default: return;
       }
     }
@@ -319,8 +357,9 @@ export const DocumentCanvas: React.FC<DocumentCanvasProps> = ({ zoom }) => {
       case 'ArrowRight': e.preventDefault(); e.shiftKey ? engine.extendSelectionRight() : engine.moveCursorRight(); return;
       case 'ArrowUp': e.preventDefault(); e.shiftKey ? engine.extendSelectionUp() : engine.moveCursorUp(); return;
       case 'ArrowDown': e.preventDefault(); e.shiftKey ? engine.extendSelectionDown() : engine.moveCursorDown(); return;
-      case 'Home': e.preventDefault(); e.shiftKey ? engine.extendSelectionToStart() : engine.moveCursorToStart(); return;
-      case 'End': e.preventDefault(); e.shiftKey ? engine.extendSelectionToEnd() : engine.moveCursorToEnd(); return;
+      // Home/End move within the current LINE (paragraph) — was: document start/end.
+      case 'Home': e.preventDefault(); e.shiftKey ? engine.extendSelectionToStartOfLine() : engine.moveCursorToStartOfLine(); return;
+      case 'End': e.preventDefault(); e.shiftKey ? engine.extendSelectionToEndOfLine() : engine.moveCursorToEndOfLine(); return;
       case 'Backspace': e.preventDefault(); deleteBackward(); return;
       case 'Delete': e.preventDefault(); deleteForward(); return;
       case 'Enter': e.preventDefault(); insertParagraph(); return;
@@ -337,7 +376,7 @@ export const DocumentCanvas: React.FC<DocumentCanvasProps> = ({ zoom }) => {
       insertText(e.key);
     }
   }, [insertText, deleteBackward, deleteForward, insertParagraph, toggleBold, toggleItalic,
-      toggleUnderline, undo, redo, selectAll, engine,
+      toggleUnderline, undo, redo, selectAll, engine, setAlignment,
       setFontSize, insertHyperlink, decreaseListLevel]);
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
@@ -495,7 +534,7 @@ const BlockRenderer: React.FC<{ block: Block }> = ({ block }) => {
 
 // ─── Paragraph Renderer ──────────────────────────────────────────────────────
 const ParagraphRenderer: React.FC<{ paragraph: Paragraph }> = ({ paragraph }) => {
-  const { selection, engine } = useDocumentEngine();
+  const { selection, engine, document: ctxDoc } = useDocumentEngine();
   const isInSelection = !selection.isCollapsed && (
     selection.start.blockId === paragraph.id || selection.end.blockId === paragraph.id
   );
@@ -504,12 +543,26 @@ const ParagraphRenderer: React.FC<{ paragraph: Paragraph }> = ({ paragraph }) =>
   const styleClass = paragraph.style !== 'Normal' ? `para-${paragraph.style}` : '';
   const alignClass = `align-${fmt.alignment}`;
 
-  // List prefix
+  // List prefix — numbered lists count consecutive siblings sharing the same
+  // list level so "1. 2. 3." renders instead of every paragraph showing "1.".
   let listPrefix = '';
   if (fmt.listFormat.type === 'bullet') {
     listPrefix = engine.getBulletCharacter(fmt.listFormat.level);
   } else if (fmt.listFormat.type === 'numbered') {
-    listPrefix = engine.getNumberCharacter(fmt.listFormat.level, 0);
+    let counter = 1;
+    for (const section of ctxDoc?.sections ?? []) {
+      let broken = false;
+      for (const block of section.blocks) {
+        if (block.id === paragraph.id) { broken = true; break; }
+        if (block.type !== 'paragraph') continue;
+        const lf = (block as Paragraph).formatting.listFormat;
+        if (lf.type === 'numbered' && lf.level === fmt.listFormat.level) counter++;
+        else if (lf.type === 'none') counter = 1;
+        else if (lf.level < fmt.listFormat.level) counter = 1;
+      }
+      if (broken) break;
+    }
+    listPrefix = engine.getNumberCharacter(fmt.listFormat.level, counter - 1);
   }
 
   // Drop cap
